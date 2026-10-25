@@ -93,9 +93,13 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         social_train = np.loadtxt(os.path.join(root, cfg["social_edges_file"]), dtype=np.int64, ndmin=2)
         extra["social_edges_file"] = cfg["social_edges_file"]
     if method in ("lightgcn", "lightgcn_s"):
+        cand = None
+        if cfg.get("cand_edges_file"):  # separate candidate channel (see LightGCN.social_c)
+            cand = np.loadtxt(os.path.join(root, cfg["cand_edges_file"]), dtype=np.int64, ndmin=2)
+            extra.update({"cand_edges_file": cfg["cand_edges_file"], "omega_c": cfg.get("omega_c", 0.5)})
         model = LightGCN(split.n_users, split.n_items, split.train,
                          social_edges=social_train if method == "lightgcn_s" else None,
-                         social_form=social_form, **common)
+                         social_form=social_form, cand_edges=cand, omega_c=cfg.get("omega_c", 0.5), **common)
 
     elif method == "gbsr":
         from .models.gbsr import GBSR
@@ -240,7 +244,10 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
     else:
         model.load_state_dict(best["state"])
     test = evaluate_split(model.score_fn(), split, "test", device)
-    res = {"best_epoch": best["epoch"], "val_ndcg@20": best["val_ndcg@20"], "test": test,
+    from .metrics import evaluate_per_user
+    peruser = evaluate_per_user(model.score_fn(), split.n_users, split.n_items, split.test,
+                                [split.train, split.val], device=device)
+    res = {"peruser": peruser, "best_epoch": best["epoch"], "val_ndcg@20": best["val_ndcg@20"], "test": test,
            "epochs_run": epoch, "sec_per_epoch": float(np.mean(epoch_times)) if epoch_times else 0.0, "device": device,
            "model": model, "history": history, "best_diag": best["diag"],
            "best_snapshot": best["snapshot"], "extra": extra}

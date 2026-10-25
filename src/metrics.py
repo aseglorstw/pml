@@ -61,3 +61,17 @@ def evaluate(score_fn, n_users: int, n_items: int, truth_pairs: np.ndarray,
     truth = to_csr(truth_pairs, n_users, n_items)
     topk = rank_topk(score_fn, n_users, exclude, max(ks), device=device)
     return recall_ndcg(topk, truth, ks)
+
+
+def evaluate_per_user(score_fn, n_users: int, n_items: int, truth_pairs: np.ndarray,
+                      exclude_pairs: list[np.ndarray], k: int = 20, device="cpu") -> dict:
+    """Per-user Recall@k and NDCG@k (users with >= 1 held-out item), same protocol as evaluate()."""
+    exclude = to_csr(np.concatenate(exclude_pairs) if exclude_pairs else np.zeros((0, 2), int), n_users, n_items)
+    truth = to_csr(truth_pairs, n_users, n_items)
+    topk = rank_topk(score_fn, n_users, exclude, k, device=device)
+    n_true = np.diff(truth.indptr)
+    users = np.where(n_true > 0)[0]
+    hits = np.asarray(truth[np.repeat(users, k), topk[users, :k].ravel()]).reshape(len(users), k) > 0
+    disc = 1.0 / np.log2(np.arange(2, k + 2))
+    idcg = np.cumsum(disc)[np.minimum(n_true[users], k) - 1]
+    return {"users": users, "recall": hits.sum(1) / n_true[users], "ndcg": (hits * disc).sum(1) / idcg}

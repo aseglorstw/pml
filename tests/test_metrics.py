@@ -45,3 +45,15 @@ def test_exclusion_does_not_leak_across_users_with_shared_scores():
                  truth_pairs=np.array([[0, 1], [1, 0]]),
                  exclude_pairs=[np.array([[0, 0]])], ks=(1,))
     assert m["recall@1"] == 1.0
+
+
+def test_per_user_metrics_average_to_global():
+    from src.metrics import evaluate_per_user
+    rng = np.random.default_rng(0)
+    scores = torch.tensor(rng.random((30, 50)), dtype=torch.float32)
+    truth = np.array([[u, i] for u in range(30) for i in rng.choice(50, 3, replace=False)])
+    ex = np.array([[u, i] for u in range(30) for i in rng.choice(50, 2, replace=False)])
+    truth = truth[~np.isin(truth[:, 0] * 50 + truth[:, 1], ex[:, 0] * 50 + ex[:, 1])]
+    g = evaluate(lambda u: scores[u], 30, 50, truth, [ex], ks=(20,))
+    p = evaluate_per_user(lambda u: scores[u], 30, 50, truth, [ex], k=20)
+    assert np.isclose(p["ndcg"].mean(), g["ndcg@20"]) and np.isclose(p["recall"].mean(), g["recall@20"])

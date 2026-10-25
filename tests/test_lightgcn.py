@@ -93,3 +93,18 @@ def test_gbsr_form_matches_official_joint_adjacency():
         eu, ei = m.propagate(torch.tensor(w, dtype=torch.float32))
         ru, ri = gbsr_dense_reference(emb, w)
         assert np.allclose(eu.detach().numpy(), ru, atol=1e-5) and np.allclose(ei.detach().numpy(), ri, atol=1e-5)
+
+
+def test_candidate_channel_separate_normalization():
+    torch.manual_seed(0)
+    cand = np.array([[0, 4], [1, 4]])
+    m0 = LightGCN(M, N, TRAIN, dim=4, social_edges=SOCIAL, social_form="gbsr")
+    torch.manual_seed(0)
+    m1 = LightGCN(M, N, TRAIN, dim=4, social_edges=SOCIAL, social_form="gbsr", cand_edges=cand, omega_c=0.5)
+    assert torch.allclose(m0.adj.to_dense(), m1.adj.to_dense())          # joint adjacency untouched
+    assert torch.allclose(m0.social.norm, m1.social.norm)
+    # candidate channel normalized by candidate degrees: deg(4)=2, deg(0)=deg(1)=1
+    assert np.allclose(sorted(m1.social_c.norm.numpy()), sorted([1 / np.sqrt(2)] * 4))
+    m1.omega_c = 0.0
+    eu0, _ = m0.propagate(); eu1, _ = m1.propagate()
+    assert torch.allclose(eu0, eu1, atol=1e-6)

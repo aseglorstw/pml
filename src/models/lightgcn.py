@@ -77,7 +77,8 @@ class SocialGraph:
 class LightGCN(nn.Module):
     def __init__(self, n_users: int, n_items: int, train: np.ndarray, dim=64, n_layers=3,
                  social_edges: np.ndarray | None = None, omega_s=0.5, device="cpu",
-                 social_deg: np.ndarray | None = None, social_form: str = "ours"):
+                 social_deg: np.ndarray | None = None, social_form: str = "ours",
+                 cand_edges: np.ndarray | None = None, omega_c: float = 0.5):
         """social_form:
         'ours' : eq. 8 - interaction term normalized by interaction degrees only, plus
                  omega_S * social term normalized by social degrees only (two separate channels).
@@ -104,6 +105,11 @@ class LightGCN(nn.Module):
                            if social_edges is not None else None)
         else:
             raise ValueError(social_form)
+        # optional SECOND social channel for candidate ties: own normalization (degrees counted on the
+        # candidates only, not added to d_u of the joint adjacency) and own weight omega_c
+        self.omega_c = omega_c
+        self.social_c = (SocialGraph(cand_edges, n_users, device)
+                         if cand_edges is not None and len(cand_edges) else None)
 
     def propagate(self, social_w: torch.Tensor | None = None):
         """Returns final (user, item) embeddings. social_w: per-edge weights or None (=1)."""
@@ -111,9 +117,13 @@ class LightGCN(nn.Module):
         layers = [e]
         for _ in range(self.n_layers):
             nxt = torch.sparse.mm(self.adj, e)
-            if self.social is not None:
-                soc = self.social.propagate(e[: self.n_users], social_w)
-                nxt = torch.cat([nxt[: self.n_users] + self.omega_s * soc, nxt[self.n_users:]])
+            if self.social is not None or self.social_c is not None:
+                users = nxt[: self.n_users]
+                if self.social is not None:
+                    users = users + self.omega_s * self.social.propagate(e[: self.n_users], social_w)
+                if self.social_c is not None:
+                    users = users + self.omega_c * self.social_c.propagate(e[: self.n_users], None)
+                nxt = torch.cat([users, nxt[self.n_users:]])
             e = nxt
             layers.append(e)
         out = torch.stack(layers).mean(0)

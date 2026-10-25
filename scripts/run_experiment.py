@@ -65,8 +65,18 @@ def write_run_diag(cfg, s, res, stage, tag):
         json.dump(out, f, indent=1)
 
 
+def save_peruser(cfg, s, res):
+    pu = res.get("peruser")
+    if pu is None:
+        return
+    d = os.path.join(ROOT, "results/peruser", cfg.get("dataset", "x"), cfg.get("name", cfg["method"]))
+    os.makedirs(d, exist_ok=True)
+    np.savez_compressed(os.path.join(d, f"seed{s}.npz"), **pu)
+
+
 def finalize(cfg, s, res, tag):
     log_result(cfg, s, res, ROOT, extra={"stage": "final"})
+    save_peruser(cfg, s, res)
     write_run_diag(cfg, s, res, "final", tag)
     if cfg.get("save_checkpoint") and "model" in res:
         print(f"[ckpt] {save_checkpoint(cfg, s, res, ROOT)}", flush=True)
