@@ -1,5 +1,5 @@
 # Warm-started control: ego embeddings initialized from the best LightGCN checkpoint
-# (same init and min_epochs as PU-GIB), to separate warm-start gains from masking gains.
+# (same init and schedule as PU-GIB), to separate warm-start gains from masking gains.
 name: lightgcn_pu_s
 dataset: lastfm
 data_dir: data/processed/lastfm
@@ -11,13 +11,15 @@ device: auto         # auto = cuda > mps > cpu; override with --device
 dim: 64
 n_layers: 3
 lr: 0.001
+lr_emb: 0.0001           # embeddings (warm start); masker/other params use lr
+eval_final: true         # also report last-epoch metrics
 batch_size: 2048
 reg: 0.0001
 omega_s: 0.5
-max_epochs: 1500
+max_epochs: 300          # fixed budget (new schedule)
 eval_every: 5
 patience: 10
-min_epochs: 100
+min_epochs: 300          # no early stop before the end; best val checkpoint is kept
 embedding_variant: best
 method: lightgcn_pu
 pool: s

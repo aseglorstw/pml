@@ -1,0 +1,22 @@
+#!/bin/bash
+# PBS job running ONE shell command (e.g. preprocessing) on CPU. The command is read from a spec file.
+#   qsub -l walltime=02:00:00 -v SPEC=results/jobs/specs/<name>.cmd,PROJECT=$PWD scripts/job_cmd.pbs
+# Resources can be overridden on the qsub command line (-l select=...).
+#PBS -N pugib_cmd
+#PBS -l select=1:ncpus=4:mem=32gb:scratch_local=10gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+set -uo pipefail
+PROJECT=${PROJECT:-${PBS_O_WORKDIR:-$(pwd)}}
+cd "$PROJECT" || { echo "cannot cd to $PROJECT"; exit 1; }
+if command -v module >/dev/null 2>&1; then module add "${PY_MODULE:-python/3.11.11-gcc-10.2.1-555dlyc}"; fi
+if [ -n "${SCRATCHDIR:-}" ]; then export TMPDIR=$SCRATCHDIR; trap 'clean_scratch' TERM EXIT; fi
+source .venv/bin/activate
+export OMP_NUM_THREADS=${PBS_NCPUS:-4}
+TAG=${PBS_JOBID%%.*}; TAG=${TAG:-local$$}
+mkdir -p results/logs
+echo "[job $TAG] $(date) host=$(hostname)"; echo "[job $TAG] $(cat "$SPEC")"
+bash -c "$(cat "$SPEC")" > "results/logs/job_${TAG}.log" 2>&1
+RC=$?
+echo "[job $TAG] exit $RC $(date)"
+exit $RC

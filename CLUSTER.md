@@ -86,3 +86,21 @@ python scripts/merge_results.py                       # afterwards: per-run CSVs
 Keep N ≤ the number of CPUs of the session (`echo $PBS_NCPUS`), since sampling and evaluation use the CPU
 (each run gets `OMP_NUM_THREADS=2` by default). For runs longer than the session, submit batch jobs from the
 same terminal with `bash scripts/submit_grid.sh <list>`; they run independently of the GUI session.
+
+## 6. Douban-Book pipeline (PBS jobs with dependencies)
+
+```bash
+cd ~/pml && git pull && source .venv/bin/activate
+bash scripts/submit_douban_pipeline.sh --dry-run    # print the qsub commands
+bash scripts/submit_douban_pipeline.sh              # submit all stages
+qstat -u $USER                                      # 'H' = held, waiting for its dependency
+```
+Stages: 0 GPU benchmark → 1 cold LightGCN seeds 0-2 (parallel) → 2 PU-GIB preprocessing seeds 0-2 (CPU,
+after all of stage 1 succeeded) → 3 ten seed-0 runs (parallel, after stage 2) → 4 merge + summary (after stage 3).
+Results: `results/douban_benchmark_cuda.txt`, `results/douban_book_prep_summary.md`,
+`results/douban_stage3_summary.md`. If a stage fails, its dependents stay held: delete them with
+`qdel`, fix, and resubmit from that stage with `--from 2` or `--from 3`.
+
+Schedule used by every warm-started run (configs/pugib, configs/gbsr): warm start from the LightGCN checkpoint,
+`lr_emb = 1e-4` for embeddings and `lr = 1e-3` for the masker, fixed 300-epoch budget with τ annealed
+1.0 → 0.2 over it (`tau_epochs: auto`), best validation checkpoint kept, last-epoch metrics also logged.

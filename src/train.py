@@ -147,6 +147,10 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
     # lr_emb: separate learning rate for the embeddings; everything else uses lr.
     if cfg.get("freeze_backbone"):
         model.emb.weight.requires_grad_(False)
+    # Default schedule for warm-started models: small lr for the (already trained) embeddings,
+    # cfg['lr'] for everything else (masker). Set lr_emb explicitly (e.g. equal to lr) to override.
+    if "lr_emb" not in cfg and extra.get("init") == "e_tilde":
+        cfg = {**cfg, "lr_emb": 1e-4}
     emb_ids = {id(model.emb.weight)}
     emb_params = [p for p in model.parameters() if id(p) in emb_ids and p.requires_grad]
     other = [p for p in model.parameters() if id(p) not in emb_ids and p.requires_grad]
