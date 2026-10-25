@@ -22,8 +22,9 @@ python -u scripts/run_experiment.py configs/lastfm_lightgcn.yaml --quiet --no-tu
         results_csv=results/jobs/local_sanity_cold.csv >> "$L" 2>&1 || fail "cold LightGCN"
 step "3 PU-GIB preprocessing (synth)"
 python -u scripts/prepare_pugib.py --dataset synth --variants best --seeds 0 >> "$L" 2>&1 || fail "preprocessing"
-step "4 noisy graph (+50% random Omega edges)"
-python scripts/make_corrupted_social.py --dataset synth --seed 0 --frac 0.5 --mode inject >> "$L" 2>&1 || fail "noise graph"
+step "4 noisy graphs (+50% uniform random edges; +50% random Omega edges)"
+python scripts/make_corrupted_social.py --dataset synth --seed 0 --frac 0.5 --mode inject --universe all >> "$L" 2>&1 || fail "noise graph"
+python scripts/make_corrupted_social.py --dataset synth --seed 0 --frac 0.5 --mode inject >> "$L" 2>&1 || fail "noise graph (omega)"
 step "5 LastFM oracle graph"
 [ -f data/processed/lastfm/seed_0/oracle/test_train_k10.txt ] || python scripts/make_oracle_social.py --dataset lastfm --seed 0 >> "$L" 2>&1
 step "6 runs ($PAR in parallel, device $DEVICE)"

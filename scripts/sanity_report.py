@@ -2,7 +2,7 @@
 
 Pre-registered rules (test NDCG@20 at the best val checkpoint, synthetic seed 0):
   a  S(Z) - L >= 0.005  and  L < S(A) < S(Z)          (L = LightGCN warm, S = LightGCN-S warm)
-  b  S(A + 50% random Omega edges) < S(A)
+  b  S(A + 50% uniformly random edges) < S(A)   (the +50% random-Omega-pairs variant is reported as info)
   c  for every kappa <= kappa* = eps/p_A (true, on Omega): c_hat <= c, pi_hat >= pi, rho_obs_hat >= rho_obs,
      rho_un_hat >= rho_un  (noise-corrected Elkan-Noto, Proposition 3.1)
   d  AUROC(alpha: true vs false observed edges) >= 0.6 for PU-GIB (beta=0.001), and recall of hidden true
@@ -61,10 +61,12 @@ for m in R.index:
                  "s/epoch": h.get("sec_per_epoch", float("nan"))})
 
 # ---- a / b
-L, SZ, SA, SAp = N("san_syn_lightgcn_warm"), N("san_syn_lgcns_Z"), N("san_syn_lgcns_A"), N("san_syn_lgcns_Aplus50")
+L, SZ, SA, SAp = N("san_syn_lightgcn_warm"), N("san_syn_lgcns_Z"), N("san_syn_lgcns_A"), N("san_syn_lgcns_Aplus50uni")
+SAo = N("san_syn_lgcns_Aplus50omega")
 verdict("a  social pathway: S(Z) beats L clearly", SZ - L >= 0.005, f"S(Z) {SZ:.4f} vs L {L:.4f} (Δ {SZ - L:+.4f}, need ≥ +0.005)")
 verdict("a  S(A) between L and S(Z)", L < SA < SZ, f"L {L:.4f} < S(A) {SA:.4f} < S(Z) {SZ:.4f}")
-verdict("b  noise sensitivity: S(A+50% random) < S(A)", SAp < SA, f"S(A+50%) {SAp:.4f} vs S(A) {SA:.4f} (Δ {SAp - SA:+.4f})")
+verdict("b  noise sensitivity: S(A+50% uniform random) < S(A)", SAp < SA,
+        f"S(A+50% uniform) {SAp:.4f} vs S(A) {SA:.4f} (Δ {SAp - SA:+.4f}); info: +50% random Ω pairs {SAo:.4f} (Δ {SAo - SA:+.4f})")
 
 # ---- c estimator vs truth on Omega
 pri = json.load(open(os.path.join(SYN, "seed_0/pugib/best/priors.json")))

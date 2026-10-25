@@ -22,6 +22,8 @@ ap.add_argument("--dataset", default="lastfm")
 ap.add_argument("--seed", type=int, default=0)
 ap.add_argument("--frac", type=float, default=0.4)
 ap.add_argument("--mode", choices=["inject", "replace"], default="inject")
+ap.add_argument("--universe", choices=["omega", "all"], default="omega",
+                help="omega: unlinked two-hop pairs (plausible-looking noise); all: uniform over all unlinked pairs")
 a = ap.parse_args()
 d = os.path.join(ROOT, "data/processed", a.dataset, f"seed_{a.seed}")
 sp = load_split(d)
@@ -30,9 +32,18 @@ pairs = om["pairs"].astype(np.int64)
 free = pairs[~om["y"] & ~isin_pairs(pairs, sp.social_val, sp.n_users)]
 rng = np.random.default_rng([a.seed, 7, int(a.frac * 100)])
 n = int(round(a.frac * len(sp.social_train)))
-fake = free[np.sort(rng.choice(len(free), n, replace=False))]
+if a.universe == "omega":
+    fake = free[np.sort(rng.choice(len(free), n, replace=False))]
+else:  # uniform over all user pairs not linked in train or held out
+    taken = set(map(tuple, np.concatenate([sp.social_train, sp.social_val]).tolist()))
+    fake = set()
+    while len(fake) < n:
+        i, j = sorted(rng.integers(0, sp.n_users, 2).tolist())
+        if i != j and (i, j) not in taken:
+            fake.add((i, j))
+    fake = np.array(sorted(fake), dtype=np.int64)
 edges = fake if a.mode == "replace" else np.unique(np.concatenate([sp.social_train, fake]), axis=0)
 os.makedirs(os.path.join(d, "corrupt"), exist_ok=True)
-name = f"{a.mode}{int(a.frac * 100)}.txt"
+name = f"{a.mode}{int(a.frac * 100)}{'' if a.universe == 'omega' else '_uniform'}.txt"
 np.savetxt(os.path.join(d, "corrupt", name), edges, fmt="%d")
-print(f"seed {a.seed}: {name}: {len(fake)} false edges from {len(free)} free Omega pairs; graph has {len(edges)} edges")
+print(f"seed {a.seed}: {name}: {len(fake)} false edges ({a.universe}); graph has {len(edges)} edges")
