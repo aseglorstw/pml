@@ -22,8 +22,11 @@ def groups(dataset, seed):
     deg = np.bincount(sp.social_train.ravel(), minlength=sp.n_users)
     ninter = np.bincount(sp.train[:, 0], minlength=sp.n_users)
     q25 = np.quantile(ninter, 0.25)
+    low = ninter <= q25
+    if low.mean() > 0.5:  # degenerate (e.g. LastFM: almost every user has the capped count) -> strictly below
+        low = ninter < q25
     return {"deg 0": deg == 0, "deg 1-2": (deg >= 1) & (deg <= 2), "deg 3+": deg >= 3,
-            f"inter ≤ q25": ninter <= q25, "inter > q25": ninter > q25, "all": np.ones(sp.n_users, bool)}
+            "few inter": low, "other inter": ~low, "all": np.ones(sp.n_users, bool)}
 
 
 def main():
