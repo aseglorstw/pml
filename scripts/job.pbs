@@ -9,12 +9,12 @@
 # or without a spec file:  qsub -v CONFIG=configs/x.yaml scripts/job.pbs
 #
 #PBS -N pugib
-#PBS -l select=1:ncpus=4:ngpus=1:mem=16gb:scratch_local=10gb
+#PBS -l select=1:ncpus=4:ngpus=1:mem=16gb:scratch_local=10gb:gpu_cap=cuda80
 #PBS -l walltime=04:00:00
 #PBS -j oe
 # No queue is given: MetaCentrum routes the job by its resources (ngpus=1 -> a GPU queue).
-# To insist on an A40, add a GPU/cluster property to the select line (CHECK the exact property in
-# the MetaCentrum "GPU clusters" page); without it any free GPU is used.
+# gpu_cap=cuda80: only GPUs with compute capability >= 8.0 (Ampere+, e.g. A40/A100). Required: the
+# CUDA 13 torch build has no kernels for older cards (a GTX 1080 Ti fails with "no kernel image").
 
 set -uo pipefail
 PROJECT=${PROJECT:-${PBS_O_WORKDIR:-$(pwd)}}
@@ -34,6 +34,16 @@ else
 fi
 echo "[job $TAG] $(date) host=$(hostname) gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null)"
 echo "[job $TAG] run_experiment.py $*"
+# fail fast if this GPU is not supported by the installed torch build
+python - <<'PY' || { echo "[job $TAG] GPU check failed (unsupported GPU for this torch build?)"; exit 3; }
+import torch
+assert torch.cuda.is_available(), "no CUDA device"
+cap = torch.cuda.get_device_capability(0)
+print("GPU", torch.cuda.get_device_name(0), "capability", cap, "| torch archs", torch.cuda.get_arch_list())
+i = torch.tensor([[0, 1], [1, 0]], device="cuda")
+x = torch.sparse_coo_tensor(i, torch.ones(2, device="cuda"), (2, 2))
+torch.sparse.mm(x, torch.ones(2, 3, device="cuda")).sum().item()
+PY
 # Every job writes its own CSV (merged later with scripts/merge_results.py).
 python -u scripts/run_experiment.py "$@" --device cuda --set results_csv=results/jobs/${TAG}.csv \
   > "results/logs/job_${TAG}.log" 2>&1

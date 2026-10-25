@@ -5,13 +5,19 @@
 #   stage 2: PU-GIB preprocessing for seeds 0 1 2 (CPU job, after ALL stage-1 jobs succeed)
 #   stage 3: seed-0 comparison, 10 GPU jobs (after stage 2), new schedule from the configs
 #   stage 4: merge per-job CSVs + summary table (after all stage-3 jobs, even failed ones)
-# Usage:  bash scripts/submit_douban_pipeline.sh [--dry-run] [--from 1|2|3]
+# Usage:  bash scripts/submit_douban_pipeline.sh [--dry-run] [--from 1|2|3] [--stage1-seeds "0 1"] [--no-bench]
 #   --from 2 / --from 3 skips the earlier stages (their outputs must already exist).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-DRY=0; FROM=1
+DRY=0; FROM=1; S1SEEDS="0 1 2"; BENCH=1
 while [ $# -gt 0 ]; do
-  case $1 in --dry-run) DRY=1;; --from) FROM=$2; shift;; *) echo "unknown $1"; exit 1;; esac; shift
+  case $1 in
+    --dry-run) DRY=1;;
+    --from) FROM=$2; shift;;
+    --stage1-seeds) S1SEEDS=$2; shift;;   # e.g. "0 1" to rerun only failed seeds (others' checkpoints exist)
+    --no-bench) BENCH=0;;
+    *) echo "unknown $1"; exit 1;;
+  esac; shift
 done
 P=$(pwd)
 mkdir -p results/jobs/specs results/pbs results/logs
@@ -32,11 +38,11 @@ sub() {  # name walltime script spec_content [depend] [select]
 DB="--set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10"
 S2=""
 if [ "$FROM" -le 1 ]; then
-  sub db_bench 00:30:00 scripts/job_cmd.pbs \
+  [ $BENCH = 1 ] && sub db_bench 00:30:00 scripts/job_cmd.pbs \
     "python -u scripts/benchmark_device.py --dataset douban_book --epochs 2 --devices cuda | tee results/douban_benchmark_cuda.txt" \
-    "" "1:ncpus=2:ngpus=1:mem=16gb:scratch_local=10gb" >/dev/null
+    "" "1:ncpus=2:ngpus=1:mem=16gb:scratch_local=10gb:gpu_cap=cuda80" >/dev/null
   IDS=()
-  for s in 0 1 2; do
+  for s in $S1SEEDS; do
     IDS+=("$(sub db1_lightgcn_s$s 08:00:00 scripts/job.pbs "configs/douban_book_lightgcn.yaml --no-tune --seeds $s $DB")")
   done
   DEP1="afterok:$(IFS=:; echo "${IDS[*]}")"
