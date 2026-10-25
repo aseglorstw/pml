@@ -1,7 +1,7 @@
 #!/bin/bash
 # PBS job for ONE run of scripts/run_experiment.py on one GPU.
-# Resource lines below must be CHECKED against the MetaCentrum documentation (queue names,
-# GPU selection for A40, scratch). Walltime is a parameter: qsub -l walltime=HH:MM:SS overrides it.
+# Resources follow the MetaCentrum recipe (select=...:ngpus=1:scratch_local=..., no explicit queue).
+# Walltime is a parameter: qsub -l walltime=HH:MM:SS overrides the default below.
 #
 # Usage (normally via scripts/submit_grid.sh):
 #   qsub -l walltime=04:00:00 -v SPEC=results/jobs/specs/<name>.args scripts/job.pbs
@@ -9,16 +9,18 @@
 # or without a spec file:  qsub -v CONFIG=configs/x.yaml scripts/job.pbs
 #
 #PBS -N pugib
-#PBS -q gpu
 #PBS -l select=1:ncpus=4:ngpus=1:mem=16gb:scratch_local=10gb
 #PBS -l walltime=04:00:00
 #PBS -j oe
-# For A40 nodes add a GPU/cluster constraint to the select line, e.g. :gpu_cap=... or :cl_<cluster>=True
-# (CHECK the current MetaCentrum documentation for the exact property names).
+# No queue is given: MetaCentrum routes the job by its resources (ngpus=1 -> a GPU queue).
+# To insist on an A40, add a GPU/cluster property to the select line (CHECK the exact property in
+# the MetaCentrum "GPU clusters" page); without it any free GPU is used.
 
 set -uo pipefail
 PROJECT=${PROJECT:-${PBS_O_WORKDIR:-$(pwd)}}
 cd "$PROJECT" || { echo "cannot cd to $PROJECT"; exit 1; }
+if command -v module >/dev/null 2>&1; then module add "${PY_MODULE:-python/3.11.11-gcc-10.2.1-555dlyc}"; fi
+if [ -n "${SCRATCHDIR:-}" ]; then export TMPDIR=$SCRATCHDIR; trap 'clean_scratch' TERM EXIT; fi
 source .venv/bin/activate
 export OMP_NUM_THREADS=${PBS_NCPUS:-4}
 TAG=${PBS_JOBID%%.*}

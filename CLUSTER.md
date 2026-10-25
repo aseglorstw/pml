@@ -1,7 +1,7 @@
 # Running on MetaCentrum (A40 GPU, PBS)
 
-Lines marked **CHECK** depend on MetaCentrum specifics (frontend host, storage path, queue,
-GPU selection, Python module, CUDA build). Verify them in the MetaCentrum documentation first.
+Python module, resource syntax and scratch handling follow the MetaCentrum recipe. Lines marked **CHECK**
+(frontend host, optional A40 property) still need a look at the MetaCentrum documentation.
 
 ## 1. Locally (Mac)
 
@@ -21,20 +21,23 @@ scp pugib_data.tar.gz <user>@<frontend>.metacentrum.cz:~/      # CHECK frontend 
 ```bash
 ssh <user>@<frontend>.metacentrum.cz           # CHECK frontend name
 git clone git@github.com:<you>/pu_gib.git      # needs a GitHub SSH key (or a token) on the cluster
-cd pu_gib
+cd pu_gib                                      # keep this directory private (chmod 700)
 tar -xzf ~/pugib_data.tar.gz                   # creates data/processed/ and results/checkpoints/
 
-# interactive GPU job for setup + GPU tests                         # CHECK queue/resource syntax
-qsub -I -q gpu -l select=1:ncpus=4:ngpus=1:mem=16gb -l walltime=1:00:00
-cd ~/pu_gib                                   # or your storage path
-module add python/3.11                        # CHECK exact module name (`module avail python`)
-bash scripts/cluster_setup.sh                 # venv + CUDA torch + requirements + tests + timing
+# (a) install: interactive CPU job with scratch (MetaCentrum recipe)
+qsub -l select=1:ncpus=1:mem=8gb:scratch_local=16gb -I
+cd ~/pu_gib && bash scripts/cluster_setup.sh   # module add python/3.11.11-gcc-10.2.1-555dlyc, venv in .venv,
+exit                                           # torch 2.14.1 CUDA build, requirements, CPU tests
+
+# (b) GPU check: short interactive GPU job
+qsub -l select=1:ncpus=1:ngpus=1:mem=8gb:scratch_local=8gb -l walltime=0:30:00 -I
+cd ~/pu_gib && bash scripts/cluster_test_gpu.sh   # nvidia-smi, CUDA-vs-CPU tests, epoch timings
 exit
 ```
 
-`cluster_setup.sh` takes `PYTHON`, `TORCH_VERSION`, `TORCH_INDEX` (CUDA build, default cu128 — **CHECK**
-with `nvidia-smi`) from the environment, e.g. `TORCH_INDEX=https://download.pytorch.org/whl/cu126 bash scripts/cluster_setup.sh`.
-The test suite includes `tests/test_device.py`, which compares CUDA results with CPU results.
+The scripts load the Python module, use `$SCRATCHDIR` as `TMPDIR` and call `clean_scratch` on exit.
+`cluster_setup.sh` tries the cu128 build of torch 2.14.1, then cu118, then plain PyPI (override with
+`TORCH_VERSION=... TORCH_INDEXES="..."`).
 
 ## 3. Submitting runs
 
@@ -46,8 +49,9 @@ bash scripts/submit_grid.sh configs/jobs/example.txt             # submit
 qstat -u $USER                                                    # monitor
 ```
 
-- Resources and queue are at the top of `scripts/job.pbs` (1 GPU, 4 CPUs, 16 GB, walltime per line). **CHECK**
-  the queue name and how to request an A40 (property on the `select` line).
+- Resources are at the top of `scripts/job.pbs`: `select=1:ncpus=4:ngpus=1:mem=16gb:scratch_local=10gb`,
+  walltime per line, no explicit queue (MetaCentrum routes GPU jobs). To force an A40, add the GPU-cluster
+  property to the `select` line (**CHECK** the "GPU clusters" page).
 - Each job writes its own CSV `results/jobs/<jobid>.csv` and log `results/logs/job_<jobid>.log`;
   PBS stdout goes to `results/pbs/`.
 - Single run without a list: `qsub -l walltime=02:00:00 -v CONFIG=configs/pugib/lightgcn_s_warm.yaml,ARGS="--seeds 0" scripts/job.pbs`
