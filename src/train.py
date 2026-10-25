@@ -86,8 +86,8 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
     method = cfg["method"]
     common = dict(dim=cfg["dim"], n_layers=cfg["n_layers"], omega_s=cfg.get("omega_s", 0.5),
                   device=device)
-    social_form = cfg.get("social_form", "ours")
-    extra = {"social_form": cfg.get("social_form", "ours")}
+    social_form = cfg.get("social_form", "gbsr")  # default: official GBSR joint normalization
+    extra = {"social_form": cfg.get("social_form", "gbsr")}
     social_train = split.social_train
     if cfg.get("social_edges_file"):  # e.g. a corrupted training social graph
         social_train = np.loadtxt(os.path.join(root, cfg["social_edges_file"]), dtype=np.int64, ndmin=2)
