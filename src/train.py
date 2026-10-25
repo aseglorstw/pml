@@ -96,6 +96,10 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         model = LightGCN(split.n_users, split.n_items, split.train,
                          social_edges=social_train if method == "lightgcn_s" else None,
                          social_form=social_form, **common)
+        scale = cfg.get("social_weight_scale")
+        if scale is not None and model.social is not None:  # uniform weight on every social tie (control)
+            model.social.norm = model.social.norm * float(scale)
+            extra["social_weight_scale"] = float(scale)
     elif method == "gbsr":
         from .models.gbsr import GBSR
         model = GBSR(split.n_users, split.n_items, split.train, social_train, beta=cfg["beta"],

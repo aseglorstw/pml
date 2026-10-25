@@ -19,7 +19,8 @@ from src.pugib_prep import anchor_estimates, channel_estimates, isin_pairs  # no
 
 SYN = os.path.join(ROOT, "data/processed/synth")
 KAPPA = 0.02
-PART1 = ["san_syn_lightgcn_warm", "san_syn_lgcns_A", "san_syn_gbsr",
+PART1 = ["san_syn_lightgcn_warm", "san_syn_lgcns_A", "ctl_scale050", "ctl_scale148", "san_syn_gbsr",
+         "ceil_denoise", "ceil_complete", "ceil_both",
          "dg_pu_k2", "dg_pu_k5", "dg_pu_k10",
          "dg_pugib_nocand_b0001", "dg_pugib_nocand_b001",
          "dg_pugib_k2_b0001", "dg_pugib_k5_b0001", "dg_pugib_k10_b0001", "san_syn_pugib_b001"]
@@ -101,10 +102,12 @@ def overrides(run, R):
     return " ".join(f"{k}={h[k]}" for k in keys if k in h and h[k] is not None)
 
 
-ROWS = [  # (label, seed-0 run, config for seeds 1-2, extra overrides)
+ROWS = [  # (label, seed-0 run, config for seeds 1-2, extra overrides); "Z"/"CEIL" are expanded per seed
     ("LightGCN warm", "san_syn_lightgcn_warm", "configs/pugib/lightgcn_warm.yaml", ""),
     ("LightGCN-S on A", "san_syn_lgcns_A", "configs/pugib/lightgcn_s_warm.yaml", ""),
+    ("LightGCN-S on A, social weights x1.484", "ctl_scale148", "configs/pugib/lightgcn_s_warm.yaml", "social_weight_scale=1.484"),
     ("LightGCN-S on Z (oracle)", "san_syn_lgcns_Z", "configs/pugib/lightgcn_s_warm.yaml", "Z"),
+    ("Denoising ceiling: LightGCN-S on A ∩ Z (oracle)", "ceil_denoise", "configs/pugib/lightgcn_s_warm.yaml", "CEIL"),
     ("GBSR", "san_syn_gbsr", "configs/gbsr/lastfm_gbsr.yaml", "--no-tune beta=5 sigma=0.25 detach_mask=false"),
 ]
 
@@ -129,6 +132,8 @@ def cmd_select():
             ex = extra.replace("--no-tune ", "").replace("--no-tune", "")
             if ex == "Z":
                 ex = f"social_edges_file=data/processed/synth/seed_{s}/truth/Z.txt"
+            if ex == "CEIL":
+                ex = f"social_edges_file=data/processed/synth/seed_{s}/ceiling/a_true.txt"
             lines.append(f"-  {cfg} {tune}--seeds {s} --set dataset=synth data_dir=data/processed/synth reg=0.0001 "
                          f"social_form=gbsr name={run0} {ex}".rstrip())
     open(os.path.join(ROOT, "configs/jobs/synth_diag4.txt"), "w").write("\n".join(lines) + "\n")

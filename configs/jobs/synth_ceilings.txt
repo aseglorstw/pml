@@ -1,0 +1,6 @@
+# Synthetic seed 0: oracle ceilings (use ground truth Z) and uniform-weight controls for GBSR.
+-  configs/pugib/lightgcn_s_warm.yaml --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=ceil_denoise social_edges_file=data/processed/synth/seed_0/ceiling/a_true.txt
+-  configs/pugib/lightgcn_s_warm.yaml --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=ceil_complete social_edges_file=data/processed/synth/seed_0/ceiling/a_plus_truecand.txt
+-  configs/pugib/lightgcn_s_warm.yaml --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=ceil_both social_edges_file=data/processed/synth/seed_0/ceiling/a_true_truecand.txt
+-  configs/pugib/lightgcn_s_warm.yaml --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=ctl_scale050 social_weight_scale=0.5
+-  configs/pugib/lightgcn_s_warm.yaml --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=ctl_scale148 social_weight_scale=1.484
