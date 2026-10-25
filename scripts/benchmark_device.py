@@ -69,16 +69,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="lastfm")
     ap.add_argument("--epochs", type=int, default=3)
+    ap.add_argument("--devices", nargs="+", default=None, help="subset of cpu/cuda/mps to time (default: all available)")
     args = ap.parse_args()
     sp_ = load_split(os.path.join(ROOT, f"data/processed/{args.dataset}/seed_0"))
     devs = ["cpu"] + (["cuda"] if torch.cuda.is_available() else []) + (["mps"] if torch.backends.mps.is_available() else [])
-    print(f"torch {torch.__version__}, threads {torch.get_num_threads()}, devices {devs}")
+    if args.devices:
+        devs = [d for d in devs if d in args.devices]
+    print(f"torch {torch.__version__}, threads {torch.get_num_threads()}, devices {devs}", flush=True)
     for dev in devs:
         try:
             ms, err = bench_spmm(sp_, dev)
-            print(f"{dev}: sparse.mm fwd {ms:.3f} ms (max abs diff vs CPU {err:.2e})")
+            print(f"{dev}: sparse.mm fwd {ms:.3f} ms (max abs diff vs CPU {err:.2e})", flush=True)
             for social in (False, True):
                 t = bench_epoch(sp_, dev, social, n_epochs=args.epochs)
-                print(f"{dev}: {'LightGCN-S' if social else 'LightGCN  '} epoch {t:.3f} s")
+                print(f"{dev}: {'LightGCN-S' if social else 'LightGCN  '} epoch {t:.3f} s", flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"{dev}: FAILED: {type(e).__name__}: {e}")
