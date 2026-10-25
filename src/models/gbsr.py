@@ -39,10 +39,11 @@ def hsic(Kx, Ky, m):
 class GBSR(nn.Module):
     def __init__(self, n_users, n_items, train, social_edges, beta=5.0, sigma=0.25, edge_bias=0.5,
                  tau=0.2, detach_mask=False, batch_size=2048, dim=64, n_layers=3, omega_s=0.5,
-                 device="cpu"):
+                 device="cpu", social_form="ours"):
         super().__init__()
         self.backbone = LightGCN(n_users, n_items, train, dim=dim, n_layers=n_layers,
-                                 social_edges=social_edges, omega_s=omega_s, device=device)
+                                 social_edges=social_edges, omega_s=omega_s, device=device,
+                                 social_form=social_form)
         self.linear_1 = nn.Linear(2 * dim, dim)
         self.linear_2 = nn.Linear(dim, 1)
         self.beta, self.sigma, self.edge_bias, self.tau = beta, sigma, edge_bias, tau

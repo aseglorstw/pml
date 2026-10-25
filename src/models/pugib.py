@@ -40,7 +40,7 @@ class PUGIB(nn.Module):
     def __init__(self, n_users, n_items, train, support, is_obs, rho, feats, ego_init,
                  dim=64, n_layers=3, omega_s=0.5, deg_mode="static", beta=0.1,
                  hidden=64, tau_start=1.0, tau_end=0.2, tau_epochs=1500, device="cpu",
-                 in_pval=None, pair_s=None, pair_r=None):
+                 in_pval=None, pair_s=None, pair_r=None, social_form="ours"):
         super().__init__()
         rho = np.asarray(rho, dtype=np.float64)
         if deg_mode == "static":
@@ -52,7 +52,7 @@ class PUGIB(nn.Module):
             raise ValueError(deg_mode)
         self.backbone = LightGCN(n_users, n_items, train, dim=dim, n_layers=n_layers,
                                  social_edges=support, omega_s=omega_s, device=device,
-                                 social_deg=deg)
+                                 social_deg=deg, social_form=social_form)
         with torch.no_grad():
             self.backbone.emb.weight.copy_(torch.as_tensor(ego_init))
         self.masker = nn.Sequential(nn.Linear(feats.shape[1], hidden), nn.ReLU(), nn.Linear(hidden, 1))

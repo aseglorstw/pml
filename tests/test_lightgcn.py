@@ -60,3 +60,36 @@ def test_gradient_reaches_edge_weights():
     loss, _ = m.bpr_loss(torch.tensor([0, 1]), torch.tensor([0, 1]), torch.tensor([5, 4]), 1e-4, w)
     loss.backward()
     assert w.grad is not None and w.grad.abs().sum() > 0
+
+
+def gbsr_dense_reference(emb, w, L=3):
+    """Official GBSR backbone: A = [[S, R], [R^T, 0]], D = row sums, Â = D^-1/2 A D^-1/2 (unmasked),
+    masked graph multiplies the social entries of Â by w; E^{l+1} = Â_w E^l, mean over layers."""
+    R = np.zeros((M, N))
+    R[TRAIN[:, 0], TRAIN[:, 1]] = 1
+    S = np.zeros((M, M))
+    S[SOCIAL[:, 0], SOCIAL[:, 1]] = 1
+    S[SOCIAL[:, 1], SOCIAL[:, 0]] = 1
+    A = np.block([[S, R], [R.T, np.zeros((N, N))]])
+    d = A.sum(1)
+    An = A / np.sqrt(np.outer(d, d))
+    W = np.zeros((M, M))
+    W[SOCIAL[:, 0], SOCIAL[:, 1]] = w
+    W[SOCIAL[:, 1], SOCIAL[:, 0]] = w
+    An[:M, :M] *= W
+    e, layers = emb, [emb]
+    for _ in range(L):
+        e = An @ e
+        layers.append(e)
+    out = np.mean(layers, 0)
+    return out[:M], out[M:]
+
+
+def test_gbsr_form_matches_official_joint_adjacency():
+    torch.manual_seed(0)
+    m = LightGCN(M, N, TRAIN, dim=4, n_layers=3, social_edges=SOCIAL, omega_s=0.5, social_form="gbsr")
+    emb = m.emb.weight.detach().double().numpy()
+    for w in (np.ones(len(SOCIAL)), np.array([1.0, 0.3, 0.0, 0.7])):
+        eu, ei = m.propagate(torch.tensor(w, dtype=torch.float32))
+        ru, ri = gbsr_dense_reference(emb, w)
+        assert np.allclose(eu.detach().numpy(), ru, atol=1e-5) and np.allclose(ei.detach().numpy(), ri, atol=1e-5)

@@ -1,0 +1,9 @@
+# Implementation checks on Douban-Book seed 0 (new schedule from the configs). Oracle graphs are a
+# deliberate TEST LEAK (diagnostic only). Walltime column ignored by run_jobs_local.sh.
+-  configs/pugib/lightgcn_warm.yaml     --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=chk_lightgcn_warm
+-  configs/pugib/lightgcn_s_warm.yaml   --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=chk_lgcns_ours social_form=ours
+-  configs/pugib/lightgcn_s_warm.yaml   --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=chk_lgcns_gbsr social_form=gbsr
+-  configs/pugib/lightgcn_s_warm.yaml   --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=chk_oracle_testtest_ours social_form=ours social_edges_file=data/processed/douban_book/seed_0/oracle/test_test_k10.txt
+-  configs/pugib/lightgcn_s_warm.yaml   --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=chk_oracle_testtest_gbsr social_form=gbsr social_edges_file=data/processed/douban_book/seed_0/oracle/test_test_k10.txt
+-  configs/pugib/lightgcn_s_warm.yaml   --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=chk_oracle_testtrain_ours social_form=ours social_edges_file=data/processed/douban_book/seed_0/oracle/test_train_k10.txt
+-  configs/pugib/lightgcn_s_warm.yaml   --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=chk_oracle_testtrain_gbsr social_form=gbsr social_edges_file=data/processed/douban_book/seed_0/oracle/test_train_k10.txt

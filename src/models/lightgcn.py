@@ -16,13 +16,18 @@ import torch
 import torch.nn as nn
 
 
-def norm_bipartite_adj(train: np.ndarray, n_users: int, n_items: int) -> sp.coo_matrix:
-    """D^{-1/2} A D^{-1/2} for the (M+N)x(M+N) user-item graph."""
+def norm_bipartite_adj(train: np.ndarray, n_users: int, n_items: int,
+                       extra_user_deg: np.ndarray | None = None) -> sp.coo_matrix:
+    """D^{-1/2} A D^{-1/2} for the (M+N)x(M+N) user-item graph.
+
+    extra_user_deg: added to the users' degrees (GBSR form: d_u = interactions + social ties)."""
     n = n_users + n_items
     r, c = train[:, 0], train[:, 1] + n_users
     rows = np.concatenate([r, c])
     cols = np.concatenate([c, r])
     deg = np.bincount(rows, minlength=n).astype(np.float64)
+    if extra_user_deg is not None:
+        deg[:n_users] += np.asarray(extra_user_deg, dtype=np.float64)
     dinv = np.zeros(n)
     dinv[deg > 0] = deg[deg > 0] ** -0.5
     vals = dinv[rows] * dinv[cols]
@@ -72,14 +77,33 @@ class SocialGraph:
 class LightGCN(nn.Module):
     def __init__(self, n_users: int, n_items: int, train: np.ndarray, dim=64, n_layers=3,
                  social_edges: np.ndarray | None = None, omega_s=0.5, device="cpu",
-                 social_deg: np.ndarray | None = None):
+                 social_deg: np.ndarray | None = None, social_form: str = "ours"):
+        """social_form:
+        'ours' : eq. 8 - interaction term normalized by interaction degrees only, plus
+                 omega_S * social term normalized by social degrees only (two separate channels).
+        'gbsr' : official GBSR/LightGCN-S backbone - ONE adjacency [[S, R], [R^T, 0]] normalized
+                 D^-1/2 A D^-1/2 with the user degree d_u = d_u^I + d_u^S (items: d_i^I), social
+                 weight 1 (omega_S ignored). Item updates are then also normalized by the
+                 combined user degree. social_deg replaces the static social degree in d_u^S."""
         super().__init__()
         self.n_users, self.n_items, self.n_layers, self.omega_s = n_users, n_items, n_layers, omega_s
+        self.social_form = social_form
         self.emb = nn.Embedding(n_users + n_items, dim)
         nn.init.normal_(self.emb.weight, std=0.1)
-        self.adj = sparse_tensor(norm_bipartite_adj(train, n_users, n_items), device)
-        self.social = (SocialGraph(social_edges, n_users, device, social_deg)
-                       if social_edges is not None else None)
+        if social_form == "gbsr" and social_edges is not None:
+            e = np.asarray(social_edges, dtype=np.int64).reshape(-1, 2)
+            d_soc = (np.bincount(e.ravel(), minlength=n_users).astype(np.float64)
+                     if social_deg is None else np.asarray(social_deg, dtype=np.float64))
+            d_int = np.bincount(np.asarray(train)[:, 0], minlength=n_users).astype(np.float64)
+            self.adj = sparse_tensor(norm_bipartite_adj(train, n_users, n_items, extra_user_deg=d_soc), device)
+            self.social = SocialGraph(e, n_users, device, deg=d_int + d_soc)
+            self.omega_s = 1.0
+        elif social_form in ("ours", "gbsr"):
+            self.adj = sparse_tensor(norm_bipartite_adj(train, n_users, n_items), device)
+            self.social = (SocialGraph(social_edges, n_users, device, social_deg)
+                           if social_edges is not None else None)
+        else:
+            raise ValueError(social_form)
 
     def propagate(self, social_w: torch.Tensor | None = None):
         """Returns final (user, item) embeddings. social_w: per-edge weights or None (=1)."""

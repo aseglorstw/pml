@@ -86,19 +86,22 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
     method = cfg["method"]
     common = dict(dim=cfg["dim"], n_layers=cfg["n_layers"], omega_s=cfg.get("omega_s", 0.5),
                   device=device)
-    extra = {}
+    social_form = cfg.get("social_form", "ours")
+    extra = {"social_form": cfg.get("social_form", "ours")}
     social_train = split.social_train
     if cfg.get("social_edges_file"):  # e.g. a corrupted training social graph
         social_train = np.loadtxt(os.path.join(root, cfg["social_edges_file"]), dtype=np.int64, ndmin=2)
         extra["social_edges_file"] = cfg["social_edges_file"]
     if method in ("lightgcn", "lightgcn_s"):
         model = LightGCN(split.n_users, split.n_items, split.train,
-                         social_edges=social_train if method == "lightgcn_s" else None, **common)
+                         social_edges=social_train if method == "lightgcn_s" else None,
+                         social_form=social_form, **common)
     elif method == "gbsr":
         from .models.gbsr import GBSR
         model = GBSR(split.n_users, split.n_items, split.train, social_train, beta=cfg["beta"],
                      sigma=cfg["sigma"], edge_bias=cfg.get("edge_bias", 0.5), tau=cfg.get("gbsr_tau", 0.2),
-                     detach_mask=cfg.get("detach_mask", False), batch_size=cfg["batch_size"], **common)
+                     detach_mask=cfg.get("detach_mask", False), batch_size=cfg["batch_size"],
+                     social_form=social_form, **common)
     elif method in ("lightgcn_pu", "pugib"):
         from .models.pugib import PUGIB, pair_features
         from .pugib_data import load_pugib_inputs
@@ -106,7 +109,8 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         extra = {"n_pval_total": inp["n_pval_total"], "rho_obs": inp["rho_obs"], "rho_un": inp["rho_un"],
                  "support_size": int(len(inp["support"]))}
         if method == "lightgcn_pu":  # support C with all weights 1, static degree
-            model = LightGCN(split.n_users, split.n_items, split.train, social_edges=inp["support"], **common)
+            model = LightGCN(split.n_users, split.n_items, split.train, social_edges=inp["support"],
+                             social_form=social_form, **common)
         else:
             from .pugib_prep import cosine_on_pairs
             feats = pair_features(inp["e_tilde"], inp["support"], inp["r"], inp["is_obs"])
@@ -119,7 +123,7 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
                           tau_start=cfg.get("tau_start", 1.0), tau_end=cfg.get("tau_end", 0.2),
                           tau_epochs=int(tau_epochs), in_pval=inp["in_pval"],
                           pair_s=cosine_on_pairs(inp["e_tilde"], inp["support"]), pair_r=inp["r"],
-                          **common)
+                          social_form=social_form, **common)
     else:
         raise ValueError(method)
     # Warm start from the best LightGCN checkpoint is the default for every social method;
