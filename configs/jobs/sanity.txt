@@ -2,7 +2,7 @@
 # tau over the budget), social_form gbsr everywhere. Walltime column ignored.
 # --- synthetic ---
 -  configs/pugib/lightgcn_warm.yaml    --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=san_syn_lightgcn_warm
--  configs/pugib/lightgcn_s_warm.yaml  --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=san_syn_lgcns_Z social_edges_file=data/processed/synth/truth/Z.txt
+-  configs/pugib/lightgcn_s_warm.yaml  --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=san_syn_lgcns_Z social_edges_file=data/processed/synth/seed_0/truth/Z.txt
 -  configs/pugib/lightgcn_s_warm.yaml  --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=san_syn_lgcns_A
 -  configs/pugib/lightgcn_s_warm.yaml  --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=san_syn_lgcns_Aplus50uni social_edges_file=data/processed/synth/seed_0/corrupt/inject50_uniform.txt
 -  configs/pugib/lightgcn_s_warm.yaml  --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=san_syn_lgcns_Aplus50omega social_edges_file=data/processed/synth/seed_0/corrupt/inject50.txt

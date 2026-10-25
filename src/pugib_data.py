@@ -27,9 +27,16 @@ def load_pugib_inputs(split: Split, seed_dir: str, cfg: dict) -> dict:
     n = split.n_users
     om = np.load(os.path.join(pdir, "omega.npz"))
     omega, r_omega = om["pairs"].astype(np.int64), om["r"].astype(np.float64)
-    pool_file = {"s": os.path.join(vdir, "pool_s.txt"), "ra": os.path.join(pdir, "pool_ra.txt"),
-                 "random": os.path.join(vdir, "pool_random.txt")}[cfg["pool"]]
-    pool = np.loadtxt(pool_file, dtype=np.int64, ndmin=2).reshape(-1, 2)
+    # pool: s / ra / random / none (support = observed ties only). pool_k: use the top-K pool written
+    # by scripts/make_pools.py (best/pool_s_k{K}.txt, pool_ra_k{K}.txt) instead of the default K=10 pool.
+    k = cfg.get("pool_k")
+    if cfg["pool"] == "none":
+        pool = np.zeros((0, 2), dtype=np.int64)
+    else:
+        pool_file = {"s": os.path.join(vdir, f"pool_s_k{k}.txt" if k else "pool_s.txt"),
+                     "ra": os.path.join(pdir, f"pool_ra_k{k}.txt" if k else "pool_ra.txt"),
+                     "random": os.path.join(vdir, "pool_random.txt")}[cfg["pool"]]
+        pool = np.loadtxt(pool_file, dtype=np.int64, ndmin=2).reshape(-1, 2)
     train = split.social_train
     assert not isin_pairs(pool, train, n).any()
     support = np.concatenate([train, pool])

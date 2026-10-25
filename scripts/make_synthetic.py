@@ -8,7 +8,8 @@ Observed graph A: every Z edge kept with probability c; false edges added unifor
 non-Z pairs so that a fraction `false_frac` of the observed edges is false.
 The same split protocol as the real data is applied (80/10/10 per user, 10% social hold-out).
 
-Writes data/processed/<name>/seed_0/ (+ stats.json) and data/processed/<name>/truth/:
+Writes data/processed/<name>/seed_<seed>/ (+ stats.json) and data/processed/<name>/seed_<seed>/truth/:
+  (the generator seed is also the split seed, so seeds 0/1/2 are three independent worlds)
   Z.txt, A_true.txt, A_false.txt, tastes.npz, truth.json (generation parameters, global c/eps,
   and the channel on Omega of the TRAINING graph: pi, c, eps, p_A, rho_obs, rho_un, kappa*).
 Usage: python scripts/make_synthetic.py [--name synth] [--users 2000] [--items 2000]
@@ -95,7 +96,7 @@ def main():
                        "train_edges_in_omega": int(y.sum()),
                        "false_train_edges": int((~isin_pairs(sp.social_train, Z, M)).sum()),
                        "false_train_edges_in_omega": int((y & ~z).sum())}}
-    td = os.path.join(out, "truth")
+    td = os.path.join(out, f"seed_{a.seed}", "truth")  # ground truth per generator seed
     os.makedirs(td, exist_ok=True)
     for nm, e in [("Z", Z), ("A_true", A_true), ("A_false", A_false)]:
         np.savetxt(os.path.join(td, f"{nm}.txt"), e, fmt="%d")

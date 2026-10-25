@@ -1,0 +1,9 @@
+# Synthetic decomposition (seed 0), social_form gbsr, new schedule. PU-GIB: anchor prior, kappa 0.02, prior norm.
+-  configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=dg_pugib_nocand_b0001 pool=none kappa=0.02 norm=prior beta=0.001
+-  configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=dg_pugib_nocand_b001 pool=none kappa=0.02 norm=prior beta=0.01
+-  configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=dg_pugib_k2_b0001 pool_k=2 kappa=0.02 norm=prior beta=0.001
+-  configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=dg_pugib_k5_b0001 pool_k=5 kappa=0.02 norm=prior beta=0.001
+-  configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=dg_pugib_k10_b0001 pool_k=10 kappa=0.02 norm=prior beta=0.001
+-  configs/pugib/lightgcn_pu_s.yaml  --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=dg_pu_k2 pool_k=2
+-  configs/pugib/lightgcn_pu_s.yaml  --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=dg_pu_k5 pool_k=5
+-  configs/pugib/lightgcn_pu_s.yaml  --seeds 0 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=dg_pu_k10 pool_k=10

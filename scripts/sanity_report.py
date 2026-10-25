@@ -45,9 +45,9 @@ def table(rows, cols):
 
 R = runs()
 N = lambda m: float(R.loc[m, "test_ndcg@20"]) if m in R.index else float("nan")
-truth = json.load(open(os.path.join(SYN, "truth/truth.json")))
+truth = json.load(open(os.path.join(SYN, "seed_0/truth/truth.json")))
 T = truth["omega"]
-Z = np.loadtxt(os.path.join(SYN, "truth/Z.txt"), dtype=np.int64)
+Z = np.loadtxt(os.path.join(SYN, "seed_0/truth/Z.txt"), dtype=np.int64)
 M = truth["params"]["users"]
 
 # ---- run table
