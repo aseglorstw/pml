@@ -1,0 +1,12 @@
+# Douban-Book stage 3 (seed 0), new schedule from the configs. Walltime column is ignored by run_jobs_local.sh.
+# Slowest first, so the GPU stays busy until the end.
+-  configs/gbsr/lastfm_gbsr.yaml         --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_gbsr beta=40 sigma=2.5 detach_mask=false
+-  configs/pugib/pugib_s_anchor.yaml     --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_pugib_s_anchor_b0 kappa=0.05 norm=prior beta=0
+-  configs/pugib/pugib_s_anchor.yaml     --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_pugib_s_anchor_b0001 kappa=0.05 norm=prior beta=0.001
+-  configs/pugib/pugib_s_anchor.yaml     --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_pugib_s_anchor_b001 kappa=0.05 norm=prior beta=0.01
+-  configs/pugib/pugib_s_unif.yaml       --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_pugib_s_unif_b0001 kappa=0.05 norm=prior beta=0.001
+-  configs/pugib/pugib_ra_anchor.yaml    --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_pugib_ra_anchor_b0001 kappa=0.05 norm=prior beta=0.001
+-  configs/pugib/lightgcn_pu_s.yaml      --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_lightgcn_pu_s
+-  configs/pugib/lightgcn_s_warm.yaml    --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_lightgcn_s_warm
+-  configs/pugib/lightgcn_s_warm.yaml    --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_lightgcn_s_warm_omega025 omega_s=0.25
+-  configs/pugib/lightgcn_warm.yaml      --no-tune --seeds 0 --set dataset=douban_book data_dir=data/processed/douban_book reg=0.0001 eval_every=10 name=db3_lightgcn_warm
