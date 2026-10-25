@@ -68,3 +68,20 @@ python scripts/summarize.py                # or summarize_step3.py / overnight_s
 # back to the Mac
 scp <user>@<frontend>.metacentrum.cz:~/pu_gib/results/results.csv results/results_cluster.csv
 ```
+
+## 5. Running inside an interactive (OnDemand / GUI) GPU session
+
+One A40 easily holds several of our runs at once. Run a job list with N runs in parallel on the
+session's GPU (survives closing the terminal thanks to nohup, but NOT the end of the session):
+
+```bash
+cd ~/pml
+nohup bash scripts/run_jobs_local.sh configs/jobs/example.txt 3 > results/logs/local_runner.log 2>&1 &
+tail -f results/logs/local_runner_status.log          # STARTED / FINISHED / FAILED per run
+nvidia-smi                                            # GPU memory / utilisation
+python scripts/merge_results.py                       # afterwards: per-run CSVs -> results/results.csv
+```
+
+Keep N ≤ the number of CPUs of the session (`echo $PBS_NCPUS`), since sampling and evaluation use the CPU
+(each run gets `OMP_NUM_THREADS=2` by default). For runs longer than the session, submit batch jobs from the
+same terminal with `bash scripts/submit_grid.sh <list>`; they run independently of the GUI session.

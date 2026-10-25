@@ -107,7 +107,7 @@ class PUGIB(nn.Module):
                 "alpha_mean_pval_in_pool": pv.mean().item() if len(pv) else float("nan"),
                 "posterior_recall_pval": (pv > 0.5).sum().item() / max(n_pv, 1),
                 "kl_mean": kl_bernoulli(a, self.rho).mean().item(),
-                "alpha_std_obs": obs.std().item(), "alpha_std_cand": cand.std().item(),
+                "alpha_std_obs": obs.std(unbiased=False).item(), "alpha_std_cand": cand.std(unbiased=False).item(),
                 "alpha_min": a.min().item(), "alpha_max": a.max().item()}
 
     @torch.no_grad()
