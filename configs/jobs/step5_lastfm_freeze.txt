@@ -1,0 +1,16 @@
+# Step 5 (LastFM seed 0): does the masker learn anything once the backbone stops overfitting?
+# All runs: warm start, fixed budget of 300 epochs (no early stop before the end), tau annealed 1.0 -> 0.2
+# over those 300 epochs, best checkpoint by val NDCG@20, plus metrics of the last epoch (eval_final).
+# PU-GIB: s pool, kappa = 0.05, expected-degree normalization.
+# Run:  nohup bash scripts/run_jobs_local.sh configs/jobs/step5_lastfm_freeze.txt 4 > results/logs/step5_runner.log 2>&1 &
+# walltime  config                                 arguments
+00:20:00 configs/pugib/lightgcn_s_warm.yaml        --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true name=s5_lgcns_freeze freeze_backbone=true
+00:20:00 configs/pugib/lightgcn_s_warm.yaml        --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true name=s5_lgcns_lremb lr_emb=0.0001
+00:20:00 configs/pugib/pugib_s_anchor.yaml         --no-tune --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true kappa=0.05 norm=prior name=s5_pugib_anchor_b0_freeze beta=0 freeze_backbone=true
+00:20:00 configs/pugib/pugib_s_anchor.yaml         --no-tune --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true kappa=0.05 norm=prior name=s5_pugib_anchor_b0_lremb beta=0 lr_emb=0.0001
+00:20:00 configs/pugib/pugib_s_anchor.yaml         --no-tune --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true kappa=0.05 norm=prior name=s5_pugib_anchor_b0001_freeze beta=0.001 freeze_backbone=true
+00:20:00 configs/pugib/pugib_s_anchor.yaml         --no-tune --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true kappa=0.05 norm=prior name=s5_pugib_anchor_b0001_lremb beta=0.001 lr_emb=0.0001
+00:20:00 configs/pugib/pugib_s_anchor.yaml         --no-tune --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true kappa=0.05 norm=prior name=s5_pugib_anchor_b001_freeze beta=0.01 freeze_backbone=true
+00:20:00 configs/pugib/pugib_s_anchor.yaml         --no-tune --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true kappa=0.05 norm=prior name=s5_pugib_anchor_b001_lremb beta=0.01 lr_emb=0.0001
+00:20:00 configs/pugib/pugib_s_unif.yaml           --no-tune --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true kappa=0.05 norm=prior name=s5_pugib_unif_b0001_freeze beta=0.001 freeze_backbone=true
+00:20:00 configs/pugib/pugib_s_unif.yaml           --no-tune --seeds 0 --set max_epochs=300 min_epochs=300 eval_every=5 tau_epochs=auto eval_final=true kappa=0.05 norm=prior name=s5_pugib_unif_b0001_lremb beta=0.001 lr_emb=0.0001

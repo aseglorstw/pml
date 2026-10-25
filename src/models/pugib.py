@@ -40,7 +40,7 @@ class PUGIB(nn.Module):
     def __init__(self, n_users, n_items, train, support, is_obs, rho, feats, ego_init,
                  dim=64, n_layers=3, omega_s=0.5, deg_mode="static", beta=0.1,
                  hidden=64, tau_start=1.0, tau_end=0.2, tau_epochs=1500, device="cpu",
-                 in_pval=None):
+                 in_pval=None, pair_s=None, pair_r=None):
         super().__init__()
         rho = np.asarray(rho, dtype=np.float64)
         if deg_mode == "static":
@@ -65,6 +65,8 @@ class PUGIB(nn.Module):
         self.tau = tau_start
         self.n_users = n_users
         self.support_np = np.asarray(support, dtype=np.int64)
+        self.pair_s = None if pair_s is None else np.asarray(pair_s, dtype=np.float64)  # for diagnostics only
+        self.pair_r = None if pair_r is None else np.asarray(pair_r, dtype=np.float64)
 
     @property
     def emb(self):
@@ -108,7 +110,21 @@ class PUGIB(nn.Module):
                 "posterior_recall_pval": (pv > 0.5).sum().item() / max(n_pv, 1),
                 "kl_mean": kl_bernoulli(a, self.rho).mean().item(),
                 "alpha_std_obs": obs.std(unbiased=False).item(), "alpha_std_cand": cand.std(unbiased=False).item(),
-                "alpha_min": a.min().item(), "alpha_max": a.max().item()}
+                "alpha_min": a.min().item(), "alpha_max": a.max().item(),
+                **self._correlations(a)}
+
+    def _correlations(self, a: torch.Tensor) -> dict:
+        """Spearman correlation of alpha with s (cosine of ẽ) and with RA, on observed edges and candidates."""
+        if self.pair_s is None:
+            return {}
+        from scipy.stats import spearmanr
+        an, obs = a.detach().cpu().numpy(), self.is_obs.cpu().numpy()
+        out = {}
+        for name, x in (("s", self.pair_s), ("ra", self.pair_r)):
+            for part, m in (("obs", obs), ("cand", ~obs)):
+                ok = m.sum() > 2 and np.std(an[m]) > 0 and np.std(x[m]) > 0
+                out[f"corr_alpha_{name}_{part}"] = float(spearmanr(an[m], x[m])[0]) if ok else float("nan")
+        return out
 
     @torch.no_grad()
     def best_snapshot(self) -> dict:

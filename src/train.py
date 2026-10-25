@@ -108,12 +108,17 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         if method == "lightgcn_pu":  # support C with all weights 1, static degree
             model = LightGCN(split.n_users, split.n_items, split.train, social_edges=inp["support"], **common)
         else:
+            from .pugib_prep import cosine_on_pairs
             feats = pair_features(inp["e_tilde"], inp["support"], inp["r"], inp["is_obs"])
+            tau_epochs = cfg.get("tau_epochs", cfg["max_epochs"])
+            if tau_epochs in (None, "auto"):  # anneal over the whole training budget
+                tau_epochs = cfg["max_epochs"]
             model = PUGIB(split.n_users, split.n_items, split.train, inp["support"], inp["is_obs"],
                           inp["rho"], feats, inp["ego"], deg_mode=cfg.get("norm", "static"),
                           beta=cfg["beta"], hidden=cfg.get("masker_hidden", 64),
                           tau_start=cfg.get("tau_start", 1.0), tau_end=cfg.get("tau_end", 0.2),
-                          tau_epochs=cfg.get("tau_epochs", cfg["max_epochs"]), in_pval=inp["in_pval"],
+                          tau_epochs=int(tau_epochs), in_pval=inp["in_pval"],
+                          pair_s=cosine_on_pairs(inp["e_tilde"], inp["support"]), pair_r=inp["r"],
                           **common)
     else:
         raise ValueError(method)
@@ -138,7 +143,18 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
     set_seed(seed)
     rng = np.random.default_rng(seed)
     model, extra = build_model(split, cfg, seed, root, device)
-    opt = torch.optim.Adam(model.parameters(), lr=cfg["lr"])
+    # freeze_backbone: embeddings stay at their (warm-start) values, only the masker trains.
+    # lr_emb: separate learning rate for the embeddings; everything else uses lr.
+    if cfg.get("freeze_backbone"):
+        model.emb.weight.requires_grad_(False)
+    emb_ids = {id(model.emb.weight)}
+    emb_params = [p for p in model.parameters() if id(p) in emb_ids and p.requires_grad]
+    other = [p for p in model.parameters() if id(p) not in emb_ids and p.requires_grad]
+    groups = ([{"params": emb_params, "lr": cfg.get("lr_emb") or cfg["lr"]}] if emb_params else []) + \
+             ([{"params": other, "lr": cfg["lr"]}] if other else [])
+    extra.update({"freeze_backbone": bool(cfg.get("freeze_backbone")), "lr_emb": cfg.get("lr_emb"),
+                  "n_trainable": int(sum(p.numel() for g in groups for p in g["params"]))})
+    opt = torch.optim.Adam(groups) if groups else None
     sampler = NegativeSampler(split.train, split.n_users, split.n_items, rng)
     bs, reg = cfg["batch_size"], cfg["reg"]
     best = {"val_ndcg@20": -1.0, "epoch": 0, "state": None, "diag": None, "snapshot": None}
@@ -147,7 +163,8 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
     diag_init = model.social_diagnostic() if use_social else None
     has_diag = hasattr(model, "eval_diagnostics")
 
-    for epoch in range(1, cfg["max_epochs"] + 1):
+    epoch = 0
+    for epoch in range(1, (cfg["max_epochs"] if opt is not None else 0) + 1):  # nothing to train -> skip
         model.train()
         if hasattr(model, "start_epoch"):
             model.start_epoch(epoch)
@@ -193,6 +210,12 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
                 break
 
     model.eval()
+    if cfg.get("eval_final") and best["state"] is not None:  # metrics of the LAST epoch, for comparison
+        extra["final_epoch"] = epoch
+        extra["final_test"] = evaluate_split(model.score_fn(), split, "test", device)
+        extra["final_val_ndcg@20"] = evaluate_split(model.score_fn(), split, "val", device)["ndcg@20"]
+        if has_diag:
+            extra["final_diag"] = model.eval_diagnostics(extra.get("n_pval_total"))
     if best["state"] is None:  # no validation happened (fixed-epoch training): keep last state
         v = evaluate_split(model.score_fn(), split, "val", device)
         best.update({"val_ndcg@20": v["ndcg@20"], "epoch": epoch})
@@ -200,7 +223,7 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
         model.load_state_dict(best["state"])
     test = evaluate_split(model.score_fn(), split, "test", device)
     res = {"best_epoch": best["epoch"], "val_ndcg@20": best["val_ndcg@20"], "test": test,
-           "epochs_run": epoch, "sec_per_epoch": float(np.mean(epoch_times)), "device": device,
+           "epochs_run": epoch, "sec_per_epoch": float(np.mean(epoch_times)) if epoch_times else 0.0, "device": device,
            "model": model, "history": history, "best_diag": best["diag"],
            "best_snapshot": best["snapshot"], "extra": extra}
     if use_social:
