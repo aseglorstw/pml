@@ -9,6 +9,6 @@ OUT=${1:-pugib_data.tar.gz}
 for d in data/processed/lastfm data/processed/douban_book results/checkpoints; do
   [ -d "$d" ] || { echo "missing $d"; exit 1; }
 done
-COPYFILE_DISABLE=1 tar -czf "$OUT" data/processed results/checkpoints
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$OUT" data/processed results/checkpoints  # no macOS metadata (avoids warnings on Linux)
 echo "wrote $OUT ($(du -h "$OUT" | cut -f1))"
 tar -tzf "$OUT" | awk -F/ '{print $1"/"$2"/"$3}' | sort | uniq -c

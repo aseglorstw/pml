@@ -76,6 +76,7 @@ session's GPU (survives closing the terminal thanks to nohup, but NOT the end of
 
 ```bash
 cd ~/pml
+mkdir -p results/logs                                 # needed once: the shell opens the log before the script runs
 nohup bash scripts/run_jobs_local.sh configs/jobs/example.txt 3 > results/logs/local_runner.log 2>&1 &
 tail -f results/logs/local_runner_status.log          # STARTED / FINISHED / FAILED per run
 nvidia-smi                                            # GPU memory / utilisation
