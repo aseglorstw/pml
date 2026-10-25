@@ -1,0 +1,183 @@
+%%
+%% NIE-PML semestral project paper template (ACM sigconf).
+%%
+\documentclass[sigconf]{acmart}
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{array}
+
+%% \BibTeX command to typeset BibTeX logo in the docs
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+%% Remove ACM rights and reference information (not needed for the course).
+\setcopyright{none}
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\acmConference[NIE-PML]{NIE-PML Semestral Project}{2026}{Prague, Czech Republic}
+
+\begin{document}
+
+\title{Positive-Unlabeled Structure Learning for Graph Bottlenecked Recommendation}
+
+\author{Robert Bakhtigariev}
+\email{bakhtrob@fel.cvut.cz}
+\affiliation{%
+  \institution{Faculty of Electrical Engineering, Czech Technical University in Prague}
+  \city{Prague}
+  \country{Czech Republic}
+}
+
+\begin{abstract}
+Graph-based social recommenders rely on user-user ties that are both noisy and incomplete. Graph Bottlenecked Social Recommendation (GBSR) only prunes observed ties, while the rewiring method SHaRe adds and removes ties with fixed similarity rules. We extend GBSR to bidirectional refinement with PU-GIB, which models the observed social graph as the output of a two-sided noisy channel, with label frequency $c$ and false-positive rate $\varepsilon$, applied to a latent preference-consistent graph. The channel is estimated from interaction-only user similarities with a noise-corrected Elkan-Noto estimator, which we show can only err in a permissive direction whenever the assumed noise rate does not exceed the true one. The resulting observation-conditioned prior replaces GBSR's HSIC regularizer in a $\beta$-ELBO that trains an edge masker over observed ties and two-hop candidates. We compare PU-GIB with GBSR and SHaRe and isolate the value of prior calibration with a factorial ablation and a controlled corruption study.
+\end{abstract}
+
+\keywords{Social Recommendation, Graph Structure Learning, Variational Bayesian Inference, Positive-Unlabeled Learning, Graph Neural Networks}
+
+\maketitle
+
+\section{Introduction}
+Social ties are a common auxiliary signal for mitigating interaction sparsity in collaborative filtering: grounded in homophily~\cite{mcpherson2001birds}, social Graph Neural Networks (GNNs) aggregate representations over multi-hop social neighborhoods~\cite{10.1145/3308558.3313488, 9311623}. Observed social graphs, however, are imperfect realizations of preference alignment. They are \emph{noisy} ($\varepsilon > 0$): users connect for reasons unrelated to consumption, and aggregating over such ties degrades accuracy~\cite{10.1145/3543507.3583374, 10.1145/3637528.3671807, 10.1145/3696410.3714874}. They are also \emph{incomplete} ($c < 1$): many preference-sharing pairs are simply not linked~\cite{10.1609/aaai.v39i17.33966}.
+
+Graph Bottlenecked Social Recommendation (GBSR)~\cite{10.1145/3637528.3671807} handles noise by pruning observed edges under an Information Bottleneck (IB)~\cite{tishby2000informationbottleneckmethod} objective, and thus implicitly assumes completeness ($c=1$). SHaRe~\cite{10.1145/3589334.3645460} adds and removes links, but with fixed similarity rules (Section~\ref{sec:share}). Extending GBSR to add edges is not a matter of enlarging its support. Classical Positive-Unlabeled (PU) link recovery~\cite{10.1145/1401890.1401920, 10.1609/aaai.v39i17.33966}, the natural source of new edges, assumes that observed edges are clean ($\varepsilon = 0$). Moreover, GBSR's HSIC regularizer rewards low dependence between representations propagated on the refined and on the observed graph; once unobserved pairs enter the support, this can be achieved by simply activating added links, so the regularizer no longer separates denoising from drift.
+
+This work extends GBSR. We propose \textbf{PU-GIB}, which keeps GBSR's edge-masking architecture (the source of ``bottlenecked'' in the title) but replaces its objective with variational Bayesian inference. We model the observed graph as a latent preference-consistent graph $Z$ passed through a two-sided channel $(c, \varepsilon)$, estimate the channel from interaction-only similarities, and turn it by Bayes' rule into an asymmetric prior $p(Z \mid A)$ that anchors a $\beta$-ELBO over the retention of observed ties and the addition of two-hop candidates. Candidates are ranked by interaction similarity, as in SHaRe; the novelty lies not in this ordering but in how strongly each tie is believed a priori, which is estimated rather than fixed by a rule, and in combining this belief with recommendation evidence in one posterior. Our contributions are:
+\begin{itemize}
+    \item \textbf{A two-sided channel prior for social graphs} that governs pruning and addition jointly and contains pruning-only denoising ($c \to 1^-$) and clean-positive PU completion ($\varepsilon \to 0^+$) as limits.
+    \item \textbf{Leakage-free channel estimation with a known error direction:} a noise-corrected Elkan-Noto estimator on interaction-only similarities, with a proof that the estimated prior is permissive, never restrictive, for any assumed noise rate not exceeding the true one.
+    \item \textbf{A prior-anchored edge masker and an evaluation that isolates the contribution:} comparison with GBSR and SHaRe, a factorial ablation of candidate ranking and prior source, and a controlled corruption study.
+\end{itemize}
+
+\section{Related Work}
+
+\subsection{Social Recommendation and Denoising}
+GNN-based collaborative filtering~\cite{10.1145/3331184.3331267, 10.1145/3397271.3401063} improves on neighborhood, factorization, and linear autoencoder models~\cite{10.1145/371920.372071, 5197422, 10.1145/3308558.3313710, 10.1145/3523227.3551482} by capturing high-order connectivity. Social GNNs model influence diffusion over the user-user graph~\cite{10.1145/3308558.3313488, 9311623}, and self-supervised variants add hypergraph or triadic views~\cite{yu2021self, yu2021socially}. Since observed ties often contradict preferences, denoising methods sample consistent neighbors~\cite{10.1145/3404835.3463028}, generate reliable friends adversarially~\cite{8970896, 9239885}, prune by preference-guided confidence (GDMSR)~\cite{10.1145/3543507.3583374}, or use self-augmentation~\cite{wang2023denoised}, hierarchical denoising~\cite{10771708}, and diffusion~\cite{10.1145/3696410.3714874}; earlier work used social regularization and autoencoders~\cite{10.1145/1935826.1935877, Pan2017ACD}. Graph IB methods such as GIB~\cite{wu2020graph} and VIB-GSL~\cite{sun2022vib} learn structures with a marginal prior shared by all node pairs, ignoring whether a pair is observed. GBSR~\cite{10.1145/3637528.3671807}, our base, masks observed links and minimizes HSIC between representations propagated on the refined and observed graphs; it assigns zero mass outside the observed edges and cannot recover missing ties.
+
+\subsection{Social Graph Rewiring and SHaRe}
+\label{sec:share}
+SHaRe~\cite{10.1145/3589334.3645460} is the closest method to ours, since it also removes and adds social links. It computes the cosine similarity $c_{ij}$ of user embeddings from an encoder run on the interaction graph only, removes every social link with $c_{ij} \le 0$, adds the $M$ most similar unlinked pairs, where $M$ equals the number of removed links, and weights the remaining links by normalized similarity; an auxiliary contrastive loss calibrates the embeddings. PU-GIB uses the same kind of interaction-only similarity but differs in three respects (Table~\ref{tab:comparison}). (i) \emph{Who decides an edge:} in SHaRe a fixed similarity rule; in PU-GIB a posterior probability learned from the recommendation loss. (ii) \emph{How much observation counts:} SHaRe's asymmetry between observed and missing ties is fixed by its rules for every graph; PU-GIB derives it from the estimated channel through the prior $\rho^{\text{obs}} > \rho^{\text{un}}$. (iii) \emph{How much to add:} SHaRe adds as many links as it removes; PU-GIB learns retention of observed ties and of candidates separately.
+
+\begin{table}[t]
+\caption{How PU-GIB differs from its base GBSR and from SHaRe.}
+\label{tab:comparison}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.25\columnwidth}>{\raggedright\arraybackslash}p{0.2\columnwidth}>{\raggedright\arraybackslash}p{0.22\columnwidth}>{\raggedright\arraybackslash}p{0.25\columnwidth}@{}}
+\toprule
+ & GBSR & SHaRe & PU-GIB \\
+\midrule
+Removes ties & learned mask & rule $c_{ij} \le 0$ & learned posterior \\
+Adds ties & no & top-$M$, $M$ = \#cuts & two-hop pool, learned \\
+Edge weight from & BPR + HSIC & similarity & BPR + prior KL \\
+Observed vs.\ missing & observed only & fixed by rules & estimated prior \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Positive-Unlabeled Learning}
+PU learning treats unlabeled instances as a mixture of hidden positives and negatives~\cite{10.1145/1401890.1401920, bekker2020learning, kiryo2017positive}. The Elkan-Noto estimator of the label frequency assumes class separability and underestimates it under overlap~\cite{bekker2020learning, lazecka2021estimating}. PU ideas have been applied to user-item feedback~\cite{hsieh2015pu, saito2020unbiased}, to node classification~\cite{10.1145/3450316, 9679099}, and to edge-incomplete link prediction in PULL~\cite{10.1609/aaai.v39i17.33966}. These methods assume clean positives and labeling that is Selected Completely at Random (SCAR) rather than dependent on topology (SAR~\cite{bekker2019beyond}); we keep PU estimation on preference features only and move topological evidence into the posterior.
+
+\section{Method}
+
+\subsection{Two-Hop Universe and Channel Model}
+Let $R_{\text{train}} \in \{0,1\}^{M \times N}$ be the training interactions and $A$ the symmetrized social adjacency with edge set $\mathcal{E}_{\text{obs}}$. Before any graph construction we hold out a random $10\%$ of the social edges, $\mathcal{E}_{\text{val}}$, leaving training edges $\mathcal{E}_{\text{train}}^{\text{S}}$ with adjacency $A^{\text{train}}$ and neighborhoods $\mathcal{N}(i)$; all compared methods use the same $\mathcal{E}_{\text{train}}^{\text{S}}$. We work in the universe of pairs, linked or not, that share a common neighbor:
+\begin{equation}
+    \Omega = \big\{\{i,j\} \;\big|\; i \neq j, \; \mathcal{N}(i) \cap \mathcal{N}(j) \neq \emptyset\big\}. \label{eq:omega_def}
+\end{equation}
+Every pair in $\Omega$ is labeled by $A^{\text{train}}$; held-out edges $\mathcal{P}_{\text{val}} = \mathcal{E}_{\text{val}} \cap \Omega$ stay in $\Omega$ with label $0$, as any model trained on $A^{\text{train}}$ sees them. The training labels are then an exact uniform thinning of the observed ones, which keeps the estimates below transferable to the full graph. Candidates are drawn from $\mathcal{U}_{\text{rank}} = \Omega \setminus \mathcal{E}_{\text{train}}^{\text{S}}$, which contains $\mathcal{P}_{\text{val}}$, so recovery of held-out ties can be measured.
+
+For each pair we posit a latent $Z_{ij} \in \{0,1\}$, with $Z_{ij}=1$ for a preference-consistent tie and prior $\pi = P(Z_{ij}=1)$, observed through a two-sided channel that we treat as SCAR within $\Omega$:
+\begin{equation}
+    P(A_{ij}^{\text{train}}=1 \mid Z_{ij}=1) = c, \qquad P(A_{ij}^{\text{train}}=1 \mid Z_{ij}=0) = \varepsilon, \label{eq:channel}
+\end{equation}
+with $0 < \varepsilon < c < 1$. The observed rate $p_A = |\mathcal{E}_{\text{train}}^{\text{S}} \cap \Omega| / |\Omega| = \pi c + (1-\pi)\varepsilon$ is known. Bayes' rule gives a prior $\rho_{ij} = p(Z_{ij}=1 \mid A_{ij}^{\text{train}})$ with two values,
+\begin{equation}
+    \rho^{\text{obs}} = \frac{\pi c}{p_A}, \qquad \rho^{\text{un}} = \frac{\pi(1-c)}{1 - p_A}, \label{eq:rho}
+\end{equation}
+for observed and unobserved pairs, with $\rho^{\text{un}} < \pi < \rho^{\text{obs}}$. As $c \to 1^-$, $\rho^{\text{un}} \to 0^+$ and the support collapses to observed links, as in pruning-only denoising~\cite{10.1145/3637528.3671807}; as $\varepsilon \to 0^+$, $\rho^{\text{obs}} \to 1^-$ and all observed links are retained, as in clean-positive PU completion~\cite{10.1609/aaai.v39i17.33966}. Training edges outside $\Omega$ (bridges) keep the prior $\rho^{\text{obs}}$, an extrapolation we state explicitly.
+
+\subsection{Leakage-Free Channel Estimation}
+\label{sec:estimation}
+Embeddings trained with social message passing would align linked users regardless of preferences, and topological indices predict links independently of preferences; either would let an observation classifier exploit artifacts rather than $Z$. We therefore pre-train a LightGCN~\cite{10.1145/3397271.3401063} on $R_{\text{train}}$ alone, obtain embeddings $\tilde{\mathbf{e}}$, and use the single feature $s_{ij} = \cos(\tilde{\mathbf{e}}_i, \tilde{\mathbf{e}}_j)$, assuming
+\begin{equation}
+    A_{ij}^{\text{train}} \perp s_{ij} \mid Z_{ij}. \label{eq:scar_feature}
+\end{equation}
+This assumption can fail if very similar users find each other more easily, or if existing ties cause shared consumption (social contagion). Both push the estimate below upward, against the direction of Proposition~\ref{prop:bracket}, so the guarantee holds only under~\eqref{eq:scar_feature}; the resulting net bias cannot be measured without the latent graph $Z$, and we treat it as a limitation.
+
+Following Elkan and Noto~\cite{10.1145/1401890.1401920}, we fit a non-decreasing scorer $g(s) \approx P(A^{\text{train}}=1 \mid s)$ on $\Omega$ by isotonic regression with the Pool-Adjacent-Violators algorithm~\cite{ayer1955empirical, barlow1972statistical, zadrozny2002transforming}, which minimizes the binary cross-entropy among monotone functions~\cite{brummer2013pav}, and average it on held-out positives: $\bar{g}_{\text{val}} = |\mathcal{P}_{\text{val}}|^{-1} \sum_{\mathcal{P}_{\text{val}}} g(s_{ij})$. Under class separability, $\mathbb{E}[\bar{g}_{\text{val}}] = \rho^{\text{obs}} c + (1-\rho^{\text{obs}})\varepsilon$; inverting with~\eqref{eq:rho} gives, for an assumed noise rate $\varepsilon \in (0, p_A)$,
+\begin{equation}
+    \hat{c}(\varepsilon) = \frac{p_A(\bar{g}_{\text{val}} - \varepsilon)}{p_A - \varepsilon}, \qquad \hat{\pi}(\varepsilon) = \frac{p_A - \varepsilon}{\hat{c}(\varepsilon) - \varepsilon}, \label{eq:noise_corrected_en}
+\end{equation}
+which reduces to the classical $\hat{c} = \bar{g}_{\text{val}}$ as $\varepsilon \to 0$. Plugging~\eqref{eq:noise_corrected_en} into~\eqref{eq:rho} yields the estimated prior. In practice the classes overlap and $\varepsilon$ is a hyperparameter; the following result fixes the direction of the resulting error.
+
+\begin{proposition}
+\label{prop:bracket}
+Assume~\eqref{eq:channel} with true noise rate $\varepsilon^\ast$, assumption~\eqref{eq:scar_feature}, a calibrated $g$, and uniformly held-out positives. Then at the population level, for every assumed $0 < \varepsilon \le \varepsilon^\ast$ with $\hat{c}(\varepsilon) > p_A$: (i) $\hat{c}(\varepsilon) \le c$, with equality at $\varepsilon = \varepsilon^\ast$ if and only if the classes are separable; (ii) $\hat{\pi} \ge \pi$, $\hat{\rho}^{\text{obs}} \ge \rho^{\text{obs}}$, and $\hat{\rho}^{\text{un}} \ge \rho^{\text{un}}$.
+\end{proposition}
+
+\begin{proof}[Proof sketch]
+By~\eqref{eq:scar_feature}, $g(s) = c\,p(s) + \varepsilon^\ast(1-p(s))$ with $p(s) = P(Z=1 \mid s)$, so $\mathbb{E}[\bar{g}_{\text{val}}] = cm + \varepsilon^\ast(1-m)$ with $m = \mathbb{E}[p(s) \mid A^{\text{train}}=1]$. Since $P(Z=1 \mid s, A^{\text{train}}=1) = c\,p(s)/g(s) \ge p(s)$, averaging gives $\rho^{\text{obs}} \ge m$, with equality iff $p(s) \in \{0,1\}$; as~\eqref{eq:noise_corrected_en} is increasing in $\bar{g}_{\text{val}}$, $\hat{c}(\varepsilon^\ast) \le c$. Further, $\partial \hat{c}/\partial \varepsilon = p_A(\bar{g}_{\text{val}} - p_A)/(p_A-\varepsilon)^2 > 0$ whenever $\hat{c} > p_A$, so $\hat{c}(\varepsilon) \le \hat{c}(\varepsilon^\ast)$, proving (i). For (ii), $\hat{\pi}$, $\hat{\rho}^{\text{obs}} = \hat{c}\hat{\pi}/p_A$, and $\hat{\rho}^{\text{un}} = \hat{\pi}(1-\hat{c})/(1-p_A)$ are decreasing in both $\hat{c}$ and $\varepsilon$ on $\varepsilon < p_A < \hat{c}$, and equal the true values at $(\varepsilon^\ast, c)$.
+\end{proof}
+
+Two consequences guide the design. Underestimating the noise rate preserves the direction of the error, whereas overestimating it can break the bound, so $\kappa = \varepsilon/p_A$ is tuned on a deliberately low grid. And the estimated prior is \emph{permissive}: it overstates the prior belief in both observed ties and candidates, so the KL term below can never over-prune relative to the true channel, and pruning of noisy ties must come from the recommendation loss.
+
+\textbf{Admissibility and fallback.} The prior is valid, $0 < \hat{\rho}^{\text{un}} < \hat{\rho}^{\text{obs}} < 1$, iff $p_A < \hat{c} < 1$, that is, $p_A < \bar{g}_{\text{val}} < 1 - \varepsilon(1-p_A)/p_A$. Values of $\varepsilon$ violating the upper bound are removed from the grid. If $\bar{g}_{\text{val}}$ does not exceed $p_A$ significantly (one-sided test at level $0.05$), the feature is uninformative and the prior falls back to an \emph{uninformed channel prior} computed from $p_A$ alone, by substituting $c^{\text{u}} = (1+p_A)/2$ and $\varepsilon^{\text{u}} = \kappa p_A$ into~\eqref{eq:noise_corrected_en} for $\pi$ and then into~\eqref{eq:rho}; ranking is unchanged, so a fallback run coincides with the PU-GIB-Fix ablation.
+
+\textbf{Candidate pool.} Under~\eqref{eq:scar_feature}, the posterior probability of a hidden tie among unobserved pairs increases with $s_{ij}$, so we rank by $s_{ij}$ and form the symmetric union $\mathcal{E}_{\text{cand}}$ of each user's top-$K$ pairs in $\mathcal{U}_{\text{rank}}$. The frozen support is $\mathcal{C} = \mathcal{E}_{\text{train}}^{\text{S}} \cup \mathcal{E}_{\text{cand}}$, with $|\mathcal{E}_{\text{cand}}| \le MK$.
+
+\subsection{Variational Structure Inference}
+\label{sec:vbi}
+On the support $\mathcal{C}$ we approximate the empirical-Bayes posterior $p(Z \mid A^{\text{train}}, R_{\text{train}})$, which is proportional to $p(R_{\text{train}} \mid Z)\, p(Z \mid A^{\text{train}})$, by a factorized $q_\phi(Z)$ with independent factors $\text{Bern}(Z_{ij}; \alpha_{ij})$. With the BPR loss~\cite{rendle2009bpr} as a surrogate for $-\ln p(R_{\text{train}} \mid Z)$, we minimize the normalized negative $\beta$-ELBO
+\begin{equation}
+\begin{split}
+    \mathcal{L} = {} & \frac{1}{|\mathcal{B}|}\mathbb{E}_{q_\phi}\big[\mathcal{L}_{\text{BPR}}(\mathcal{B}; Z, \theta)\big] \\
+    & + \frac{\beta}{|\mathcal{C}|} \sum_{\{i,j\} \in \mathcal{C}} \mathrm{KL}\big(\text{Bern}(\alpha_{ij}) \,\|\, \text{Bern}(\hat{\rho}_{ij})\big),
+\end{split} \label{eq:vib_obj}
+\end{equation}
+which replaces GBSR's HSIC term. The KL keeps each edge at the belief implied by the channel unless the recommendation loss provides evidence against it.
+
+\textbf{Masker.} The masker reads the frozen embeddings $\tilde{\mathbf{e}}$ rather than trainable ones, so retained edges cannot make their endpoints look more similar to the masker through propagation, together with the Resource Allocation index $r_{ij}$~\cite{zhou2009predicting} and the observation indicator; topology is admissible here because the posterior, unlike the estimator, does not rely on SCAR:
+\begin{equation}
+\begin{split}
+    \alpha_{ij} = \sigma\big(\text{MLP}_\phi[\, & \tilde{\mathbf{e}}_i + \tilde{\mathbf{e}}_j \,\|\, |\tilde{\mathbf{e}}_i - \tilde{\mathbf{e}}_j| \,\|\, \tilde{\mathbf{e}}_i \odot \tilde{\mathbf{e}}_j \\
+    & \|\, \log(1+r_{ij}) \,\|\, A_{ij}^{\text{train}}\,]\big).
+\end{split} \label{eq:sym_mlp}
+\end{equation}
+All inputs are symmetric, so $\alpha_{ij} = \alpha_{ji}$. In training we sample Binary Concrete weights~\cite{maddison2017concrete, jang2017categorical} $\tilde{Z}_{ij} = \sigma\big((\operatorname{logit}\alpha_{ij} + \operatorname{logit} u_{ij})/\tau\big)$, $u_{ij} \sim \text{U}(0,1)$, and evaluate the KL in closed form; this relaxed objective is a surrogate that recovers the discrete $\beta$-ELBO as $\tau \to 0$. At test time each edge is weighted by $\alpha_{ij}$.
+
+\textbf{Propagation.} The LightGCN-S backbone adds weighted social aggregation to LightGCN's user update:
+\begin{equation}
+    \mathbf{e}_u^{(l+1)} = \sum_{i \in \mathcal{N}_{\text{I}}(u)} \frac{\mathbf{e}_i^{(l)}}{\sqrt{d_u^{\text{I}} d_i^{\text{I}}}} + \omega_{\text{S}} \sum_{v \in \mathcal{C}(u)} \frac{\tilde{Z}_{uv}}{\sqrt{d_u^{\mathcal{C}} d_v^{\mathcal{C}}}} \mathbf{e}_v^{(l)}, \label{eq:lgcn_u}
+\end{equation}
+where $\mathcal{N}_{\text{I}}(u)$ is the set of items of user $u$, $d^{\text{I}}$ are interaction degrees, and $d_u^{\mathcal{C}} = |\mathcal{C}(u)|$ is the \emph{static} support degree; item updates and layer averaging follow LightGCN. The static normalization matters: with the soft degree $\sum_v \tilde{Z}_{uv}$, uniformly down-weighting all ties of a user would cancel, and a user with only noisy ties would still aggregate them at full strength. Embeddings $\theta$ (initialized from $\tilde{\mathbf{e}}$) and $\phi$ are trained jointly. Building $\Omega$ costs $O(\sum_k |\mathcal{N}(k)|^2)$ once, and each epoch costs $O((|\mathcal{E}_{\text{train}}^{\text{S}}| + MK)d)$.
+
+\section{Experiments}
+
+\subsection{Setup}
+\label{sec:protocol}
+\textbf{Data and metrics.} We use LastFM and Douban-Book, split interactions 80/10/10, and report Recall@$N$ and NDCG@$N$ ($N \in \{10, 20\}$) under full ranking, averaged over three seeds of the interaction split and the social hold-out. We also report $|\Omega|$, $p_A$, $\bar{g}_{\text{val}}$, and fallback frequency, and measure social recovery as the fraction of held-out ties $\mathcal{P}_{\text{val}}$ that enter the candidate pool and that receive $\alpha_{ij} > 0.5$, against the base rate $|\mathcal{P}_{\text{val}}|/|\mathcal{U}_{\text{rank}}|$.
+
+\textbf{Baselines.} All methods share the LightGCN-S backbone and the training social graph: \textbf{LightGCN}~\cite{10.1145/3397271.3401063} (no social graph), \textbf{LightGCN-S} (unrefined social graph), \textbf{GBSR}~\cite{10.1145/3637528.3671807} (base paper), \textbf{SHaRe}~\cite{10.1145/3589334.3645460} (its rewiring rule and contrastive calibration applied on top of LightGCN-S, with similarities from its own interaction-only encoder), and \textbf{LightGCN-PU} (support $\mathcal{C}$ with $\tilde{Z} \equiv 1$, i.e., addition without masking). Since SHaRe uses the same kind of similarity, comparing it with PU-GIB isolates the decision mechanism: fixed rules versus a calibrated posterior.
+
+\textbf{Ablations.} A $2 \times 2$ design crosses candidate ranking ($s_{ij}$ or $r_{ij}$) with the prior (estimated or uninformed): \textbf{PU-GIB}, \textbf{PU-GIB-Fix}, \textbf{PU-GIB-RA-Est}, and \textbf{PU-GIB-RA}. \textbf{PU-GIB-Grid} tunes $(\rho^{\text{obs}}, \rho^{\text{un}})$ directly on validation; if it matches PU-GIB, calibration mainly replaces two hyperparameters by one interpretable noise rate, and we report it as such.
+
+\textbf{Hyperparameters.} We use $d=64$, batch size 2048, $L=3$, $\omega_{\text{S}} = 0.5$, Adam with learning rate $10^{-3}$, and an $L_2$ weight tuned on LightGCN-S. PU-GIB uses 20 pre-training epochs, a two-layer masker with 64 units, $K = 10$, $\tau$ annealed from 1.0 to 0.2, $\beta \in \{0.01, 0.1, 1\}$, and $\kappa \in \{0.02, 0.05, 0.1\}$; PU-GIB-Grid searches $\rho^{\text{obs}} \in \{0.7, 0.8, 0.9\}$ and $\rho^{\text{un}} \in \{0.01, 0.05, 0.1\}$. Selection uses validation NDCG@20.
+
+\subsection{Controlled Corruption}
+\label{sec:grid}
+To test robustness and the estimator, we corrupt $\mathcal{E}_{\text{obs}}$ before the social hold-out in two settings: hiding $40\%$ of the edges ($\mathcal{E}_{\text{hid}}$), or injecting false edges equal to $40\%$ of the observed ones, sampled uniformly from unlinked pairs of the original two-hop universe ($\mathcal{E}_{\text{inj}}$). Every method then recomputes $\Omega$ from the corrupted training graph and receives no information about the corruption. We report recall of $\mathcal{E}_{\text{hid}}$ in the pool and in the posterior, and the AUROC of $1-\alpha_{ij}$ for separating $\mathcal{E}_{\text{inj}}$ from genuine ties. As a stability check, uniform hiding of a fraction $x$ scales $p_A$ and $\bar{g}_{\text{val}}$ by $1-x$ in the population, so $\hat{c}$ should scale by $1-x$ at fixed $\kappa$ and $\hat{\rho}^{\text{obs}}$ should remain unchanged. Because hiding is independent of $s_{ij}$, this holds whether or not~\eqref{eq:scar_feature} is satisfied; deviations therefore measure the finite-sample stability of the isotonic fit and the effect of rebuilding $\Omega$, not the bias discussed in Section~\ref{sec:estimation}.
+
+\subsection{Results}
+
+\section{Conclusion}
+% Limitations to discuss here: SCAR within Omega is a population-level
+% approximation (SAR extension: label frequency as a function of r_ij);
+% prior and candidate pool are frozen after pre-training; building Omega is
+% quadratic in node degree, which is why Epinions-scale graphs are omitted.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{bakhtrob}
+
+\end{document}

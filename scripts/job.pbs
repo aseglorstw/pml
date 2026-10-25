@@ -1,0 +1,40 @@
+#!/bin/bash
+# PBS job for ONE run of scripts/run_experiment.py on one GPU.
+# Resource lines below must be CHECKED against the MetaCentrum documentation (queue names,
+# GPU selection for A40, scratch). Walltime is a parameter: qsub -l walltime=HH:MM:SS overrides it.
+#
+# Usage (normally via scripts/submit_grid.sh):
+#   qsub -l walltime=04:00:00 -v SPEC=results/jobs/specs/<name>.args scripts/job.pbs
+# where the spec file holds one line: <config.yaml> [run_experiment.py arguments]
+# or without a spec file:  qsub -v CONFIG=configs/x.yaml scripts/job.pbs
+#
+#PBS -N pugib
+#PBS -q gpu
+#PBS -l select=1:ncpus=4:ngpus=1:mem=16gb:scratch_local=10gb
+#PBS -l walltime=04:00:00
+#PBS -j oe
+# For A40 nodes add a GPU/cluster constraint to the select line, e.g. :gpu_cap=... or :cl_<cluster>=True
+# (CHECK the current MetaCentrum documentation for the exact property names).
+
+set -uo pipefail
+PROJECT=${PROJECT:-${PBS_O_WORKDIR:-$(pwd)}}
+cd "$PROJECT" || { echo "cannot cd to $PROJECT"; exit 1; }
+source .venv/bin/activate
+export OMP_NUM_THREADS=${PBS_NCPUS:-4}
+TAG=${PBS_JOBID%%.*}
+TAG=${TAG:-local$$}
+mkdir -p results/jobs results/logs
+
+if [ -n "${SPEC:-}" ]; then
+  eval "set -- $(cat "$SPEC")"          # config + arguments from the spec file
+else
+  set -- "${CONFIG:?set CONFIG or SPEC}" ${ARGS:-}
+fi
+echo "[job $TAG] $(date) host=$(hostname) gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null)"
+echo "[job $TAG] run_experiment.py $*"
+# Every job writes its own CSV (merged later with scripts/merge_results.py).
+python -u scripts/run_experiment.py "$@" --device cuda --set results_csv=results/jobs/${TAG}.csv \
+  > "results/logs/job_${TAG}.log" 2>&1
+RC=$?
+echo "[job $TAG] exit $RC $(date)"
+exit $RC

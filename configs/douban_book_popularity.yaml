@@ -1,0 +1,5 @@
+# Popularity baseline (sanity check). No training.
+method: popularity
+dataset: douban_book
+data_dir: data/processed/douban_book
+seeds: [0, 1, 2]

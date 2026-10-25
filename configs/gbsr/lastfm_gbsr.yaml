@@ -1,0 +1,28 @@
+# GBSR ported to our LightGCN-S backbone (src/models/gbsr.py); warm start from the LightGCN checkpoint.
+# Official defaults: beta=5, sigma=0.25, edge_bias=0.5, tau=0.2 (douban_book README: beta=40, sigma=2.5).
+# detach_mask: true = official PyTorch behaviour (masker gets no gradient), false = as in the paper.
+method: gbsr
+name: gbsr
+dataset: lastfm
+data_dir: data/processed/lastfm
+seeds: [0, 1, 2]
+device: auto         # auto = cuda > mps > cpu; override with --device
+dim: 64
+n_layers: 3
+lr: 0.001
+batch_size: 2048
+reg: 0.0001
+omega_s: 0.5
+max_epochs: 1500
+eval_every: 5
+patience: 10
+min_epochs: 100
+beta: 5.0
+sigma: 0.25
+edge_bias: 0.5
+gbsr_tau: 0.2
+detach_mask: false
+tune:
+  seed: 0
+  beta: [0.5, 2.0, 5.0, 40.0]
+  sigma: [0.25, 2.5]

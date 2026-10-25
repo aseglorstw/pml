@@ -1,0 +1,14 @@
+# data, results and environments stay out of git (copy data to the cluster with scripts/pack_data.sh)
+data/
+results/
+.venv/
+venv/
+*.pt
+*.ckpt
+checkpoints/
+pugib_data*.tar.gz
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+*.log

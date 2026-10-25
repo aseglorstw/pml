@@ -1,0 +1,23 @@
+# Warm-started control: ego embeddings initialized from the best LightGCN checkpoint
+# (same init and min_epochs as PU-GIB), to separate warm-start gains from masking gains.
+name: lightgcn_warm
+dataset: lastfm
+data_dir: data/processed/lastfm
+seeds:
+- 0
+- 1
+- 2
+device: auto         # auto = cuda > mps > cpu; override with --device
+dim: 64
+n_layers: 3
+lr: 0.001
+batch_size: 2048
+reg: 0.0001
+omega_s: 0.5
+max_epochs: 1500
+eval_every: 5
+patience: 10
+min_epochs: 100
+embedding_variant: best
+method: lightgcn
+init: e_tilde

@@ -1,0 +1,4 @@
+# walltime  config                                  run_experiment.py arguments
+00:30:00    configs/lastfm_popularity.yaml          --seeds 0
+02:00:00    configs/pugib/lightgcn_s_warm.yaml      --seeds 0
+03:00:00    configs/pugib/pugib_s_anchor.yaml       --no-tune --seeds 0 --set kappa=0.05 beta=0.01 norm=prior

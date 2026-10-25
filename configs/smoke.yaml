@@ -1,0 +1,20 @@
+# Quick end-to-end check (few epochs), writes to results/smoke.csv
+method: lightgcn_s
+dataset: smoke
+data_dir: data/processed/lastfm
+results_csv: results/smoke.csv
+seeds: [0, 1]
+device: auto         # auto = cuda > mps > cpu; override with --device
+dim: 64
+n_layers: 3
+lr: 0.001
+batch_size: 2048
+reg: 0.0001
+omega_s: 0.5
+max_epochs: 10
+eval_every: 5
+patience: 10
+save_checkpoint: true
+tune:
+  seed: 0
+  reg: [0.0001, 0.001]

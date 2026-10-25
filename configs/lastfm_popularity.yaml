@@ -1,0 +1,5 @@
+# Popularity baseline (sanity check). No training.
+method: popularity
+dataset: lastfm
+data_dir: data/processed/lastfm
+seeds: [0, 1, 2]
