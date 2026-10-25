@@ -96,10 +96,7 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         model = LightGCN(split.n_users, split.n_items, split.train,
                          social_edges=social_train if method == "lightgcn_s" else None,
                          social_form=social_form, **common)
-        scale = cfg.get("social_weight_scale")
-        if scale is not None and model.social is not None:  # uniform weight on every social tie (control)
-            model.social.norm = model.social.norm * float(scale)
-            extra["social_weight_scale"] = float(scale)
+
     elif method == "gbsr":
         from .models.gbsr import GBSR
         model = GBSR(split.n_users, split.n_items, split.train, social_train, beta=cfg["beta"],
@@ -130,6 +127,15 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
                           social_form=social_form, **common)
     else:
         raise ValueError(method)
+    # Global social weight omega: multiplies every social entry of the normalized adjacency, on top of
+    # any mask (LightGCN-S, LightGCN-PU, PU-GIB). GBSR keeps its own gate. 'social_weight_scale' is the
+    # older name of the same thing.
+    omega = cfg.get("social_omega", cfg.get("social_weight_scale"))
+    if omega is not None and method != "gbsr":
+        sg = getattr(model, "social", None) or getattr(getattr(model, "backbone", None), "social", None)
+        if sg is not None:
+            sg.norm = sg.norm * float(omega)
+            extra["social_omega"] = float(omega)
     # Warm start from the best LightGCN checkpoint is the default for every social method;
     # plain LightGCN defaults to random init. PU-GIB always starts from ẽ (set in its constructor).
     init = cfg.get("init", "random" if method == "lightgcn" else "e_tilde")
