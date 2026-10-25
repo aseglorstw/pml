@@ -1,0 +1,11 @@
+# selected omega by seed-0 val NDCG@20: {"LightGCN-S on A": 1.5, "LightGCN-PU K=10": 1.5, "PU-GIB no candidates (\u03b2=0.001)": 1.5, "PU-GIB K=10 (\u03b2=0.01)": 1.5, "Denoising ceiling (A \u2229 Z)": 1.5}
+- configs/pugib/lightgcn_s_warm.yaml --seeds 1 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_lgcnsA_w15 social_omega=1.5 
+- configs/pugib/lightgcn_s_warm.yaml --seeds 2 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_lgcnsA_w15 social_omega=1.5 
+- configs/pugib/lightgcn_pu_s.yaml --seeds 1 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_pu10_w15 social_omega=1.5 pool=s pool_k=10
+- configs/pugib/lightgcn_pu_s.yaml --seeds 2 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_pu10_w15 social_omega=1.5 pool=s pool_k=10
+- configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 1 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_nocand_w15 social_omega=1.5 pool=none beta=0.001 kappa=0.02 norm=prior prior=anchor
+- configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 2 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_nocand_w15 social_omega=1.5 pool=none beta=0.001 kappa=0.02 norm=prior prior=anchor
+- configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 1 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_pugib10_w15 social_omega=1.5 pool=s beta=0.01 kappa=0.02 norm=prior prior=anchor
+- configs/pugib/pugib_s_anchor.yaml --no-tune --seeds 2 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_pugib10_w15 social_omega=1.5 pool=s beta=0.01 kappa=0.02 norm=prior prior=anchor
+- configs/pugib/lightgcn_s_warm.yaml --seeds 1 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_ceil_w15 social_omega=1.5 social_edges_file=data/processed/synth/seed_1/ceiling/a_true.txt
+- configs/pugib/lightgcn_s_warm.yaml --seeds 2 --set dataset=synth data_dir=data/processed/synth reg=0.0001 social_form=gbsr name=om_ceil_w15 social_omega=1.5 social_edges_file=data/processed/synth/seed_2/ceiling/a_true.txt
