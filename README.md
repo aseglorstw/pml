@@ -95,9 +95,35 @@ Clone it into `data/raw/gbsr_repo/src`, then `python scripts/prepare_data.py --d
 nohup bash scripts/run_douban_step2.sh > results/logs/douban_step2.log 2>&1 &   # baselines + PU-GIB prep
 ```
 
-## Warm start (default for social methods)
+## Paper protocol (`configs/paper/`, current default)
 
-Every social method (LightGCN-S, LightGCN-PU, PU-GIB, GBSR, later SHaRe) starts its ego embeddings
+All methods start from scratch (random init, std 0.1), Adam lr 1e-3 for all parameters, at most 800 epochs,
+early stopping on our validation NDCG@20 (patience 10 evaluations), `social_form: gbsr`. The interaction-only
+LightGCN (`configs/<dataset>_lightgcn.yaml`) only supplies ẽ and s for the PU-GIB preprocessing.
+
+- **PU-GIB** (`src/models/pugib.py`): mask α = σ(MLP[ẽ_i+ẽ_j, |ẽ_i−ẽ_j|, ẽ_i⊙ẽ_j, log(1+r), A]) on frozen ẽ; observed
+  ties in GBSR's joint adjacency with weight ω (`social_omega`), candidates in a separate channel with their own
+  static degrees and weight ω_c (`omega_c`); loss = BPR + L2 + λ·HSIC (`hsic_lambda`, `hsic_sigma`, users and
+  items, as GBSR) + β·mean KL(α‖ρ̂) (`beta`); τ annealed 1.0 → 0.2 over `max_epochs`; evaluation weights ties by α.
+- **Preprocessing** (`scripts/prepare_pugib.py`): P_val = E_val ∩ Ω is split into P_est (estimator, z-test,
+  fallback to the uninformed prior if not significant) and P_rec (recovery metrics: pool recall, AUROC of α over
+  candidates with P_est excluded from the negatives). κ values with ĉ_EN ≥ 1 are rejected; ĉ is clipped below 1.
+- **Variants**: `pugib` (s pool, anchored prior), `pugib_prune` (no candidates), `pugib_fix` (uninformed prior),
+  `pugib_ra_est`, `pugib_ra`, `pugib_grid`, `lightgcn_pu` (candidate channel, weight 1), `gbsr`, `gbsr_detach`,
+  `uniform` (LightGCN-S with `social_omega` = mean GBSR mask weight), `lightgcn`, `lightgcn_s`.
+- Configs from earlier experiments (`configs/pugib/`, `configs/gbsr/`) set `init: e_tilde` (warm start) explicitly.
+
+## GBSR port check (`configs/gbsr_port/`, `scripts/submit_gbsr_port.sh`)
+
+`scripts/make_gbsr_split.py` converts the authors' Douban-Book split (`douban_gbsr`: selection on their test file,
+directed social entries with self-loops; `douban_gbsr_val`: 10% of train carved out as validation).
+`configs/gbsr_port/gbsr_official.yaml` reproduces the official PyTorch training (init 0.01, random gate at
+evaluation, detached mask, ties count as improvement, full last batch). Stage 1 = β 40 / β 0 (+ LightGCN for
+(f)); stage 2 = ablations (a)-(f). Report: `python scripts/summarize_gbsr_port.py`.
+
+## Warm start (earlier experiments)
+
+With `init: e_tilde`, a model starts its ego embeddings
 from the best-validation LightGCN checkpoint of the same dataset and seed
 (`results/checkpoints/lightgcn_<dataset>_seed<k>.pt`). Plain LightGCN starts from random init.
 Override with `init: random` (the cold LightGCN-S baseline configs set this explicitly).
