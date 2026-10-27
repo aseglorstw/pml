@@ -124,18 +124,20 @@ class LightGCN(nn.Module):
         self.social_c = (SocialGraph(cand_edges, n_users, device)
                          if cand_edges is not None and len(cand_edges) else None)
 
-    def propagate(self, social_w: torch.Tensor | None = None):
-        """Returns final (user, item) embeddings. social_w: per-edge weights or None (=1)."""
+    def propagate(self, social_w: torch.Tensor | None = None, cand_w: torch.Tensor | None = None,
+                  use_cand: bool = True):
+        """Returns final (user, item) embeddings. social_w / cand_w: per-tie weights of the observed and the
+        candidate channel, or None (= 1). use_cand=False drops the candidate channel (HSIC reference)."""
         e = self.emb.weight
         layers = [e]
         for _ in range(self.n_layers):
             nxt = torch.sparse.mm(self.adj, e)
-            if self.social is not None or self.social_c is not None:
+            if self.social is not None or (self.social_c is not None and use_cand):
                 users = nxt[: self.n_users]
                 if self.social is not None:
                     users = users + self.omega_s * self.social.propagate(e[: self.n_users], social_w)
-                if self.social_c is not None:
-                    users = users + self.omega_c * self.social_c.propagate(e[: self.n_users], None)
+                if self.social_c is not None and use_cand:
+                    users = users + self.omega_c * self.social_c.propagate(e[: self.n_users], cand_w)
                 nxt = torch.cat([users, nxt[self.n_users:]])
             e = nxt
             layers.append(e)
@@ -161,9 +163,9 @@ class LightGCN(nn.Module):
             e = torch.cat([inter[: self.n_users] + soc, inter[self.n_users:]])
         return out
 
-    def bpr_loss(self, users, pos, neg, reg: float, social_w=None):
+    def bpr_loss(self, users, pos, neg, reg: float, social_w=None, cand_w=None):
         """Mean BPR loss + reg * 0.5 * ||ego embeddings of batch||^2 / batch (LightGCN convention)."""
-        eu, ei = self.propagate(social_w)
+        eu, ei = self.propagate(social_w, cand_w)
         self._last_prop = (eu, ei)  # reused by GBSR's HSIC term
         u, p, n = eu[users], ei[pos], ei[neg]
         bpr = nn.functional.softplus(-((u * p).sum(1) - (u * n).sum(1))).mean()
@@ -178,8 +180,8 @@ class LightGCN(nn.Module):
         return loss, {"bpr": bpr}
 
     @torch.no_grad()
-    def score_fn(self, social_w=None):
-        eu, ei = self.propagate(social_w)
+    def score_fn(self, social_w=None, cand_w=None):
+        eu, ei = self.propagate(social_w, cand_w)
         return lambda users: eu[users] @ ei.T
 
 

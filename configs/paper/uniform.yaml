@@ -1,0 +1,28 @@
+# Uniform control: LightGCN-S with every social entry multiplied by the mean mask weight learned by GBSR (pass it as --set social_omega=<mean gate incl. +0.5 bias>)
+# Paper protocol (bakhtrob.tex Sec. 3-4): cold start, Adam 1e-3, <= 800 epochs, early stopping on our
+# validation NDCG@20 (patience 10 evaluations), social_form gbsr (joint normalization), tau over the budget.
+# Datasets: --set dataset=<d> data_dir=data/processed/<d>; omega / omega_c come from LightGCN-S / LightGCN-PU.
+name: paper_uniform
+dataset: lastfm
+data_dir: data/processed/lastfm
+seeds:
+- 0
+- 1
+- 2
+device: auto
+dim: 64
+n_layers: 3
+lr: 0.001
+batch_size: 2048
+reg: 0.0001
+init: random
+init_std: 0.1
+social_form: gbsr
+max_epochs: 800
+eval_every: 5
+patience: 10
+min_epochs: 0
+eval_final: true
+embedding_variant: best
+method: lightgcn_s
+social_omega: null

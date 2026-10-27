@@ -34,8 +34,7 @@ def _losses(device):
     torch.manual_seed(0)
     feats = pair_features(np.random.default_rng(0).normal(size=(M, 8)), SOCIAL, np.ones(len(SOCIAL)),
                           np.ones(len(SOCIAL), bool))
-    pg = PUGIB(M, N, TRAIN, SOCIAL, np.ones(len(SOCIAL), bool), np.full(len(SOCIAL), 0.9), feats,
-               torch.randn(M + N, 8) * 0.1, dim=8, device=device).to(device)
+    pg = PUGIB(M, N, TRAIN, SOCIAL, len(SOCIAL), np.full(len(SOCIAL), 0.9), feats, dim=8, device=device).to(device)
     out["pugib_alpha"] = pg.alpha().cpu().numpy()
     torch.manual_seed(0)
     gb = GBSR(M, N, TRAIN, SOCIAL, dim=8, device=device).to(device)

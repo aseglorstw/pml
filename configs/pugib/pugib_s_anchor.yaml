@@ -42,3 +42,4 @@ tune:
   norm:
   - static
   - prior
+init: e_tilde            # warm start (earlier schedule); paper configs are in configs/paper/

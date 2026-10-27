@@ -28,3 +28,4 @@ tune:
   seed: 0
   beta: [0.5, 2.0, 5.0, 40.0]
   sigma: [0.25, 2.5]
+init: e_tilde            # warm start (earlier schedule); paper configs are in configs/paper/

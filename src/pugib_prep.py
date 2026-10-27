@@ -55,6 +55,7 @@ def cosine_on_pairs(emb: np.ndarray, pairs: np.ndarray) -> np.ndarray:
 
 
 # ------------------------------------------------------- channel estimation ------
+C_MAX = 1 - 1e-6
 def fit_isotonic(s: np.ndarray, y: np.ndarray) -> tuple[IsotonicRegression, np.ndarray]:
     iso = IsotonicRegression(increasing=True, out_of_bounds="clip")
     g = iso.fit_transform(s, y.astype(np.float64))
@@ -65,10 +66,12 @@ def channel_estimates(p_a: float, g_val: float, kappa: float) -> dict:
     """Noise-corrected Elkan-Noto (eq. 6) and the resulting prior (eq. 4)."""
     eps = kappa * p_a
     upper = 1 - eps * (1 - p_a) / p_a
-    c = p_a * (g_val - eps) / (p_a - eps)
+    c_raw = p_a * (g_val - eps) / (p_a - eps)
+    c = min(c_raw, C_MAX)  # clipped below 1 for numerical safety
     pi = (p_a - eps) / (c - eps)
     out = prior_from(p_a, c, pi)
-    out.update({"kappa": kappa, "eps": eps, "upper_bound": upper,
+    out.update({"kappa": kappa, "eps": eps, "upper_bound": upper, "c_hat_raw": c_raw,
+                "removed": bool(c_raw >= 1),  # kappa removed from the grid (c_EN >= 1)
                 "admissible_upper": bool(g_val < upper), "admissible_lower": bool(g_val > p_a)})
     return out
 
@@ -112,11 +115,11 @@ def anchor_estimates(p_a: float, g_val: float, g_top: float, kappa: float) -> di
     """c_anchor = max(c_EN(eps), g_top); pi and rho as before."""
     en = channel_estimates(p_a, g_val, kappa)
     eps = en["eps"]
-    c = max(en["c_hat"], g_top)
+    c = min(max(en["c_hat"], g_top), C_MAX)
     pi = (p_a - eps) / (c - eps)
     out = prior_from(p_a, c, pi)
     out.update({"kappa": kappa, "eps": eps, "c_hat_en": en["c_hat"], "g_top": g_top,
-                "anchor_active": bool(g_top > en["c_hat"])})
+                "anchor_active": bool(g_top > en["c_hat"]), "removed": en["removed"]})
     return out
 
 

@@ -104,8 +104,8 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
 
     elif method == "gbsr":
         from .models.gbsr import GBSR
-        model = GBSR(split.n_users, split.n_items, split.train, social_train, beta=cfg["beta"],
-                     sigma=cfg["sigma"], edge_bias=cfg.get("edge_bias", 0.5), tau=cfg.get("gbsr_tau", 0.2),
+        model = GBSR(split.n_users, split.n_items, split.train, social_train,
+                     beta=cfg.get("hsic_lambda", cfg.get("beta")), sigma=cfg.get("hsic_sigma", cfg.get("sigma")), edge_bias=cfg.get("edge_bias", 0.5), tau=cfg.get("gbsr_tau", 0.2),
                      detach_mask=cfg.get("detach_mask", False), batch_size=cfg["batch_size"],
                      social_form=social_form, social_directed=split.social_directed,
                      init_std=cfg.get("init_std", 0.1), eval_gate=cfg.get("eval_gate", "mean"),
@@ -114,24 +114,29 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         from .models.pugib import PUGIB, pair_features
         from .pugib_data import load_pugib_inputs
         inp = load_pugib_inputs(split, os.path.join(root, cfg["data_dir"], f"seed_{seed}"), cfg)
-        extra = {"n_pval_total": inp["n_pval_total"], "rho_obs": inp["rho_obs"], "rho_un": inp["rho_un"],
-                 "support_size": int(len(inp["support"]))}
-        if method == "lightgcn_pu":  # support C with all weights 1, static degree
-            model = LightGCN(split.n_users, split.n_items, split.train, social_edges=inp["support"],
-                             social_form=social_form, **common)
+        extra.update({"n_prec_total": inp["n_prec_total"], "rho_obs": inp["rho_obs"], "rho_un": inp["rho_un"],
+                      "support_size": int(len(inp["support"])), "pool_size": inp["pool_size"],
+                      "pool_recall_prec": inp["pool_recall_prec"], **inp["prior_info"]})
+        obs, cand = inp["support"][: inp["n_obs"]], inp["support"][inp["n_obs"]:]
+        if method == "lightgcn_pu":  # observed ties in the joint adjacency, candidates in their channel, weights 1
+            model = LightGCN(split.n_users, split.n_items, split.train, social_edges=obs,
+                             social_form=social_form, cand_edges=cand if len(cand) else None,
+                             omega_c=cfg.get("omega_c", 0.25), init_std=cfg.get("init_std", 0.1), **common)
         else:
             from .pugib_prep import cosine_on_pairs
             feats = pair_features(inp["e_tilde"], inp["support"], inp["r"], inp["is_obs"])
             tau_epochs = cfg.get("tau_epochs", cfg["max_epochs"])
             if tau_epochs in (None, "auto"):  # anneal over the whole training budget
                 tau_epochs = cfg["max_epochs"]
-            model = PUGIB(split.n_users, split.n_items, split.train, inp["support"], inp["is_obs"],
-                          inp["rho"], feats, inp["ego"], deg_mode=cfg.get("norm", "static"),
-                          beta=cfg["beta"], hidden=cfg.get("masker_hidden", 64),
-                          tau_start=cfg.get("tau_start", 1.0), tau_end=cfg.get("tau_end", 0.2),
-                          tau_epochs=int(tau_epochs), in_pval=inp["in_pval"],
+            model = PUGIB(split.n_users, split.n_items, split.train, inp["support"], inp["n_obs"], inp["rho"], feats,
+                          omega_c=cfg.get("omega_c", 0.25), beta=cfg["beta"],
+                          hsic_lambda=cfg.get("hsic_lambda", 0.0), hsic_sigma=cfg.get("hsic_sigma", 2.5),
+                          hsic_items=cfg.get("hsic_items", True), batch_size=cfg["batch_size"],
+                          hidden=cfg.get("masker_hidden", 64), tau_start=cfg.get("tau_start", 1.0),
+                          tau_end=cfg.get("tau_end", 0.2), tau_epochs=int(tau_epochs),
+                          in_prec=inp["in_prec"], in_pest=inp["in_pest"],
                           pair_s=cosine_on_pairs(inp["e_tilde"], inp["support"]), pair_r=inp["r"],
-                          social_form=social_form, **common)
+                          social_form=social_form, init_std=cfg.get("init_std", 0.1), **common)
     else:
         raise ValueError(method)
     # Global social weight omega: multiplies every social entry of the normalized adjacency, on top of
@@ -143,11 +148,11 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         if sg is not None:
             sg.norm = sg.norm * float(omega)
             extra["social_omega"] = float(omega)
-    # Warm start from the best LightGCN checkpoint is the default for every social method;
-    # plain LightGCN defaults to random init. PU-GIB always starts from ẽ (set in its constructor).
-    init = cfg.get("init", "random" if method == "lightgcn" else "e_tilde")
+    # Cold start (random init) is the default for every method, as in the paper; `init: e_tilde` warm-starts
+    # from the best LightGCN checkpoint (earlier experiments). The LightGCN checkpoint also supplies ẽ and s.
+    init = cfg.get("init", "random")
     extra["init"] = init
-    if init == "e_tilde" and method != "pugib":
+    if init == "e_tilde":
         ck = torch.load(warm_start_path(root, cfg, seed), map_location="cpu")
         with torch.no_grad():
             model.emb.weight.copy_(ck["ego"])

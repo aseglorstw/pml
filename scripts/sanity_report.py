@@ -1,7 +1,7 @@
 """Evaluate the sanity suite and write results/sanity_report.md (explicit PASS/FAIL per check).
 
 Pre-registered rules (test NDCG@20 at the best val checkpoint, synthetic seed 0):
-  a  S(Z) - L >= 0.005  and  L < S(A) < S(Z)          (L = LightGCN warm, S = LightGCN-S warm)
+  a  S(Z) - L >= 0.005  and  L < S(A) < S(Z)          (L = LightGCN, S = LightGCN-S; paper protocol, cold start)
   b  S(A + 50% uniformly random edges) < S(A)   (the +50% random-Omega-pairs variant is reported as info)
   c  for every kappa <= kappa* = eps/p_A (true, on Omega): c_hat <= c, pi_hat >= pi, rho_obs_hat >= rho_obs,
      rho_un_hat >= rho_un  (noise-corrected Elkan-Noto, Proposition 3.1)
@@ -61,7 +61,7 @@ for m in R.index:
                  "s/epoch": h.get("sec_per_epoch", float("nan"))})
 
 # ---- a / b
-L, SZ, SA, SAp = N("san_syn_lightgcn_warm"), N("san_syn_lgcns_Z"), N("san_syn_lgcns_A"), N("san_syn_lgcns_Aplus50uni")
+L, SZ, SA, SAp = N("san_syn_lightgcn"), N("san_syn_lgcns_Z"), N("san_syn_lgcns_A"), N("san_syn_lgcns_Aplus50uni")
 SAo = N("san_syn_lgcns_Aplus50omega")
 verdict("a  social pathway: S(Z) beats L clearly", SZ - L >= 0.005, f"S(Z) {SZ:.4f} vs L {L:.4f} (Δ {SZ - L:+.4f}, need ≥ +0.005)")
 verdict("a  S(A) between L and S(Z)", L < SA < SZ, f"L {L:.4f} < S(A) {SA:.4f} < S(Z) {SZ:.4f}")
@@ -132,12 +132,12 @@ verdict("e  PU-GIB on A beats S(A)", PG > SA, f"PU-GIB {PG:.4f} vs S(A) {SA:.4f}
 verdict("e  GBSR on A beats S(A)", GB > SA, f"GBSR {GB:.4f} vs S(A) {SA:.4f} (Δ {GB - SA:+.4f})")
 
 # ---- LastFM
-LL, LS, LO, LG = (N(m) for m in ["san_lf_lightgcn_warm", "san_lf_lgcns_A", "san_lf_lgcns_oracle", "san_lf_gbsr"])
+LL, LS, LO, LG = (N(m) for m in ["san_lf_lightgcn", "san_lf_lgcns_A", "san_lf_lgcns_oracle", "san_lf_gbsr"])
 verdict("LastFM regression: oracle test-train beats L", LO - LL >= 0.005, f"oracle {LO:.4f} vs L {LL:.4f} (Δ {LO - LL:+.4f})")
 
-out = ["# Sanity report (social_form = gbsr everywhere)", "",
+out = ["# Sanity report (paper protocol: cold start, early stopping on validation, social_form = gbsr)", "",
        "| check | result | numbers |", "|---|---|---|"] + [f"| {n} | **{v}** | {d} |" for n, v, d in verdicts]
-out += ["", f"LastFM (info): GBSR {LG:.4f}, LightGCN-S {LS:.4f}, LightGCN warm {LL:.4f} → "
+out += ["", f"LastFM (info): GBSR {LG:.4f}, LightGCN-S {LS:.4f}, LightGCN {LL:.4f} → "
         f"GBSR − LightGCN-S {LG - LS:+.4f}, GBSR − LightGCN {LG - LL:+.4f}", "",
         "## Synthetic world", "", "```", json.dumps({k: truth[k] for k in
         ["n_Z", "n_A", "n_A_true", "n_A_false", "false_frac_observed", "c_global", "eps_global"]}), json.dumps(T), "```", "",

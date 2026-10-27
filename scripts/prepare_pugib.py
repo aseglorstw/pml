@@ -119,13 +119,22 @@ def process_seed(seed, variants, K, data_dir):
     y = isin_pairs(omega, split.social_train, n)
     in_pval = isin_pairs(omega, split.social_val, n)
     assert not (y & in_pval).any()
+    # P_val = E_val ∩ Omega split at random into two halves: P_est (estimator only), P_rec (recovery metric only)
+    pv_idx = np.where(in_pval)[0]
+    pv_idx = pv_idx[np.random.default_rng([seed, 5]).permutation(len(pv_idx))]
+    in_pest = np.zeros_like(in_pval)
+    in_prec = np.zeros_like(in_pval)
+    in_pest[pv_idx[: len(pv_idx) // 2]] = True
+    in_prec[pv_idx[len(pv_idx) // 2:]] = True
     u_mask = ~y
     p_val = omega[in_pval]
+    p_rec = omega[in_prec]
     r = resource_allocation(A, omega)
     assert (r > 0).all()
     p_a = float(y.mean())
     gs = {"seed": seed, "n_users": n, "omega": int(len(omega)), "positives": int(y.sum()), "p_A": p_a,
-          "u_rank": int(u_mask.sum()), "p_val": int(in_pval.sum()),
+          "u_rank": int(u_mask.sum()), "p_val": int(in_pval.sum()), "p_est": int(in_pest.sum()),
+          "p_rec": int(in_prec.sum()),
           "e_train": int(len(split.social_train)), "e_val": int(len(split.social_val)),
           "train_bridges": int(len(split.social_train) - y.sum()),
           "heldout_bridges": int(len(split.social_val) - in_pval.sum()),
@@ -133,7 +142,7 @@ def process_seed(seed, variants, K, data_dir):
           "train_social_degree": degree_stats(split.social_train, n),
           "ra_auroc_pval_vs_urank": float(roc_auc_score(in_pval[u_mask], r[u_mask]))}
     np.savez_compressed(os.path.join(out, "omega.npz"), pairs=omega.astype(np.int32), y=y,
-                        in_pval=in_pval, r=r.astype(np.float32))
+                        in_pval=in_pval, in_pest=in_pest, in_prec=in_prec, r=r.astype(np.float32))
     with open(os.path.join(out, "graph_stats.json"), "w") as f:
         json.dump(gs, f, indent=2)
 
@@ -153,11 +162,12 @@ def process_seed(seed, variants, K, data_dir):
         s = cosine_on_pairs(emb, omega)
         iso, g = fit_isotonic(s, y)
         assert np.isclose(g.mean(), p_a), (g.mean(), p_a)
-        gv = g[in_pval]
+        gv = g[in_pest]  # estimator uses P_est only
         g_val, se = float(gv.mean()), float(gv.std(ddof=1) / np.sqrt(len(gv)))
-        informative = bool(g_val - 1.645 * se > p_a)
-        priors = {"p_A": p_a, "g_val": g_val, "g_val_se": se, "n_p_val": int(len(gv)),
-                  "informative": informative, "mean_g_omega": float(g.mean()),
+        z = (g_val - p_a) / se if se > 0 else float("inf")
+        informative = bool(z > 1.645)  # one-sided z-test at level 0.05
+        priors = {"p_A": p_a, "g_val": g_val, "g_val_se": se, "n_p_est": int(len(gv)), "z": z,
+                  "informative": informative, "fallback": not informative, "mean_g_omega": float(g.mean()),
                   "estimated": {str(k): channel_estimates(p_a, g_val, k) for k in KAPPAS},
                   "uninformed": {str(k): uninformed_prior(p_a, k) for k in KAPPAS},
                   "embeddings": emb_info}
@@ -170,12 +180,14 @@ def process_seed(seed, variants, K, data_dir):
         pools = {"s": pool_s, "ra": pool_ra, "random": pool_rand}
         pstats = {}
         for name, pool in pools.items():
-            st = pool_stats(pool, p_val, len(u_pairs), n, n_e_val=len(split.social_val))
+            st = pool_stats(pool, p_rec, len(u_pairs), n)  # recovery measured on P_rec only
             sup = union_edges(split.social_train, pool)
             st["support_size"] = int(len(sup))
             st["support_degree"] = degree_stats(sup, n)
             pstats[name] = st
         sims = {"auroc_s_pval_vs_urank": float(roc_auc_score(in_pval[u_mask], s[u_mask])),
+                "auroc_s_prec_vs_urank_wo_pest": float(roc_auc_score(in_prec[u_mask & ~in_pest],
+                                                                     s[u_mask & ~in_pest])),
                 "auroc_s_train_vs_urank": float(roc_auc_score(y, s)),
                 "mean_s": {"train_pos": float(s[y].mean()), "p_val": float(s[in_pval].mean()),
                            "u_rank": float(s[u_mask].mean())}}
