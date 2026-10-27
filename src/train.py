@@ -116,7 +116,8 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         inp = load_pugib_inputs(split, os.path.join(root, cfg["data_dir"], f"seed_{seed}"), cfg)
         extra.update({"n_prec_total": inp["n_prec_total"], "rho_obs": inp["rho_obs"], "rho_un": inp["rho_un"],
                       "support_size": int(len(inp["support"])), "pool_size": inp["pool_size"],
-                      "pool_recall_prec": inp["pool_recall_prec"], **inp["prior_info"]})
+                      "pool_recall_prec": inp["pool_recall_prec"], "cand_outside_omega": inp["cand_outside_omega"],
+                      **inp["prior_info"]})
         obs, cand = inp["support"][: inp["n_obs"]], inp["support"][inp["n_obs"]:]
         if method == "lightgcn_pu":  # observed ties in the joint adjacency, candidates in their channel, weights 1
             model = LightGCN(split.n_users, split.n_items, split.train, social_edges=obs,

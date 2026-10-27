@@ -24,9 +24,10 @@ from src.splits import load_split  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--seed", type=int, default=0)
+ap.add_argument("--dataset", default="synth")
 ap.add_argument("--K", type=int, nargs="+", default=[5, 10, 20])
 a = ap.parse_args()
-d = os.path.join(ROOT, "data/processed/synth", f"seed_{a.seed}")
+d = os.path.join(ROOT, "data/processed", a.dataset, f"seed_{a.seed}")
 sp = load_split(d)
 M = sp.n_users
 Z = np.loadtxt(os.path.join(d, "truth/Z.txt"), dtype=np.int64)

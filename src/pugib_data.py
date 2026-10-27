@@ -44,6 +44,9 @@ def load_pugib_inputs(split: Split, seed_dir: str, cfg: dict) -> dict:
     else:
         pool_file = {"s": os.path.join(vdir, f"pool_s_k{k}.txt" if k else "pool_s.txt"),
                      "ra": os.path.join(pdir, f"pool_ra_k{k}.txt" if k else "pool_ra.txt"),
+                     # global: top-K by s over ALL unlinked pairs (scripts/make_global_pools.py); pairs outside
+                     # Omega get rho_un estimated on Omega and RA = 0 (no common neighbour)
+                     "global": os.path.join(vdir, f"global_pool_k{k or 10}.txt"),
                      "random": os.path.join(vdir, "pool_random.txt")}[cfg["pool"]]
         pool = np.loadtxt(pool_file, dtype=np.int64, ndmin=2).reshape(-1, 2)
     train = split.social_train
@@ -56,7 +59,8 @@ def load_pugib_inputs(split: Split, seed_dir: str, cfg: dict) -> dict:
     pos = np.clip(np.searchsorted(keys_o, keys_c), 0, len(keys_o) - 1)
     found = keys_o[pos] == keys_c
     r = np.where(found, r_omega[pos], 0.0)
-    assert found[~is_obs].all()  # candidates are in Omega
+    if cfg.get("pool") != "global":
+        assert found[~is_obs].all()  # two-hop candidates are in Omega
 
     with open(os.path.join(vdir, "priors.json")) as f:
         priors = json.load(f)
@@ -77,4 +81,4 @@ def load_pugib_inputs(split: Split, seed_dir: str, cfg: dict) -> dict:
             "in_prec": in_prec, "in_pest": in_pest, "in_pval": in_prec | in_pest,
             "n_prec_total": n_prec_total,
             "pool_recall_prec": float(in_prec[~is_obs].sum() / max(n_prec_total, 1)),
-            "pool_size": int(len(pool))}
+            "pool_size": int(len(pool)), "cand_outside_omega": int((~found[~is_obs]).sum())}
