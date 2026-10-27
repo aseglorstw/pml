@@ -139,11 +139,10 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
                           social_form=social_form, init_std=cfg.get("init_std", 0.1), **common)
     else:
         raise ValueError(method)
-    # Global social weight omega: multiplies every social entry of the normalized adjacency, on top of
-    # any mask (LightGCN-S, LightGCN-PU, PU-GIB). GBSR keeps its own gate. 'social_weight_scale' is the
-    # older name of the same thing.
+    # Global social weight omega: multiplies every observed-tie entry of the normalized adjacency, on top of
+    # any mask or gate (LightGCN-S, LightGCN-PU, PU-GIB, GBSR). 'social_weight_scale' is the older name.
     omega = cfg.get("social_omega", cfg.get("social_weight_scale"))
-    if omega is not None and method != "gbsr":
+    if omega is not None:  # for GBSR, omega multiplies on top of its gate
         sg = getattr(model, "social", None) or getattr(getattr(model, "backbone", None), "social", None)
         if sg is not None:
             sg.norm = sg.norm * float(omega)
