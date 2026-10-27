@@ -1,0 +1,7 @@
+# GBSR port check, stage 2: one change at a time relative to gbsrport_official.
+12:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_a_mask_grad detach_mask=false
+12:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_b_eval_mean eval_gate=mean
+12:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_c_gate_fixed1 gate_mode=fixed1
+12:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_d_hsic_users hsic_items=false
+12:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_e_carved_val dataset=douban_gbsr_val data_dir=data/processed/douban_gbsr_val
+12:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_f_warm init=e_tilde lr_emb=0.0001

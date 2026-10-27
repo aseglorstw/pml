@@ -25,6 +25,10 @@ class Split:
     test: np.ndarray
     social_train: np.ndarray  # (E, 2) undirected u < v
     social_val: np.ndarray
+    # val_is_test: model selection on the test set (official GBSR protocol); test then excludes train only.
+    # social_directed: social_train holds directed entries (row user, neighbour) as given, self-loops kept.
+    val_is_test: bool = False
+    social_directed: bool = False
 
 
 def split_interactions(inter: np.ndarray, n_users: int, rng: np.random.Generator,
@@ -89,8 +93,12 @@ def load_split(folder: str) -> Split:
         meta = json.load(f)
 
     def rd(name):
-        a = np.loadtxt(os.path.join(folder, f"{name}.txt"), dtype=np.int64, ndmin=2)
+        path = os.path.join(folder, f"{name}.txt")
+        if os.path.getsize(path) == 0:
+            return np.zeros((0, 2), dtype=np.int64)
+        a = np.loadtxt(path, dtype=np.int64, ndmin=2)
         return a.reshape(-1, 2)
 
     return Split(meta["n_users"], meta["n_items"], rd("train"), rd("val"), rd("test"),
-                 rd("social_train"), rd("social_val"))
+                 rd("social_train"), rd("social_val"), bool(meta.get("val_is_test", False)),
+                 bool(meta.get("social_directed", False)))

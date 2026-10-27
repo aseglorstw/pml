@@ -69,11 +69,11 @@ class NegativeSampler:
 
 
 def evaluate_split(score_fn, split: Split, which: str, device="cpu") -> dict:
-    """val: exclude train. test: exclude train and val."""
+    """val: exclude train. test: exclude train and val (train only if the split selects on test)."""
     if which == "val":
         return evaluate(score_fn, split.n_users, split.n_items, split.val, [split.train], device=device)
-    return evaluate(score_fn, split.n_users, split.n_items, split.test, [split.train, split.val],
-                    device=device)
+    exclude = [split.train] if split.val_is_test else [split.train, split.val]
+    return evaluate(score_fn, split.n_users, split.n_items, split.test, exclude, device=device)
 
 
 def warm_start_path(root: str, cfg: dict, seed: int) -> str:
@@ -99,14 +99,17 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
             extra.update({"cand_edges_file": cfg["cand_edges_file"], "omega_c": cfg.get("omega_c", 0.5)})
         model = LightGCN(split.n_users, split.n_items, split.train,
                          social_edges=social_train if method == "lightgcn_s" else None,
-                         social_form=social_form, cand_edges=cand, omega_c=cfg.get("omega_c", 0.5), **common)
+                         social_form=social_form, cand_edges=cand, omega_c=cfg.get("omega_c", 0.5),
+                         social_directed=split.social_directed, init_std=cfg.get("init_std", 0.1), **common)
 
     elif method == "gbsr":
         from .models.gbsr import GBSR
         model = GBSR(split.n_users, split.n_items, split.train, social_train, beta=cfg["beta"],
                      sigma=cfg["sigma"], edge_bias=cfg.get("edge_bias", 0.5), tau=cfg.get("gbsr_tau", 0.2),
                      detach_mask=cfg.get("detach_mask", False), batch_size=cfg["batch_size"],
-                     social_form=social_form, **common)
+                     social_form=social_form, social_directed=split.social_directed,
+                     init_std=cfg.get("init_std", 0.1), eval_gate=cfg.get("eval_gate", "mean"),
+                     gate_mode=cfg.get("gate_mode", "learned"), hsic_items=cfg.get("hsic_items", True), **common)
     elif method in ("lightgcn_pu", "pugib"):
         from .models.pugib import PUGIB, pair_features
         from .pugib_data import load_pugib_inputs
@@ -194,7 +197,10 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
         perm = rng.permutation(len(split.train))
         sums = {}
         for start in range(0, len(perm), bs):
-            b = split.train[perm[start:start + bs]]
+            idx = perm[start:start + bs]
+            if cfg.get("full_last_batch") and len(idx) < bs and len(perm) >= bs:
+                idx = perm[len(perm) - bs:]  # official _batch_sampling: last batch = last bs triplets
+            b = split.train[idx]
             users, pos = b[:, 0], b[:, 1]
             neg = sampler.sample(users)
             loss, parts = model.train_step_loss(torch.as_tensor(users, device=device),
@@ -215,7 +221,8 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
             diag = model.eval_diagnostics(extra.get("n_pval_total")) if has_diag else {}
             history.append({"epoch": epoch, **avg, "val_recall@20": v["recall@20"],
                             "val_ndcg@20": v["ndcg@20"], **diag})
-            improved = v["ndcg@20"] > best["val_ndcg@20"]
+            improved = (v["ndcg@20"] >= best["val_ndcg@20"]) if cfg.get("improve_ties") \
+                else (v["ndcg@20"] > best["val_ndcg@20"])
             if improved:
                 best = {"val_ndcg@20": v["ndcg@20"], "epoch": epoch,
                         "state": copy.deepcopy(model.state_dict()), "diag": diag,
@@ -246,7 +253,7 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
     test = evaluate_split(model.score_fn(), split, "test", device)
     from .metrics import evaluate_per_user
     peruser = evaluate_per_user(model.score_fn(), split.n_users, split.n_items, split.test,
-                                [split.train, split.val], device=device)
+                                [split.train] if split.val_is_test else [split.train, split.val], device=device)
     res = {"peruser": peruser, "best_epoch": best["epoch"], "val_ndcg@20": best["val_ndcg@20"], "test": test,
            "epochs_run": epoch, "sec_per_epoch": float(np.mean(epoch_times)) if epoch_times else 0.0, "device": device,
            "model": model, "history": history, "best_diag": best["diag"],

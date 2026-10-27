@@ -37,17 +37,28 @@ def hsic(Kx, Ky, m):
 
 
 class GBSR(nn.Module):
+    """Options (all default to the behaviour described in the GBSR paper; the official code differs):
+    detach_mask : True = official PyTorch code (torch_version/GBSR.py line 68), masker gets no gradient.
+    eval_gate   : 'mean'   = noise-free gate sigmoid(logit/tau) + bias at evaluation;
+                  'sample' = fresh logistic-noise gate at evaluation (official eval_test).
+    gate_mode   : 'learned' = MLP gate; 'fixed1' = every social weight fixed to 1 (masked graph = observed
+                  graph), HSIC kept (ablation).
+    hsic_items  : False = HSIC on users only (ablation).
+    """
+
     def __init__(self, n_users, n_items, train, social_edges, beta=5.0, sigma=0.25, edge_bias=0.5,
                  tau=0.2, detach_mask=False, batch_size=2048, dim=64, n_layers=3, omega_s=0.5,
-                 device="cpu", social_form="ours"):
+                 device="cpu", social_form="ours", social_directed=False, init_std=0.1,
+                 eval_gate="mean", gate_mode="learned", hsic_items=True):
         super().__init__()
         self.backbone = LightGCN(n_users, n_items, train, dim=dim, n_layers=n_layers,
                                  social_edges=social_edges, omega_s=omega_s, device=device,
-                                 social_form=social_form)
+                                 social_form=social_form, social_directed=social_directed, init_std=init_std)
         self.linear_1 = nn.Linear(2 * dim, dim)
         self.linear_2 = nn.Linear(dim, 1)
         self.beta, self.sigma, self.edge_bias, self.tau = beta, sigma, edge_bias, tau
         self.detach_mask, self.m = detach_mask, batch_size
+        self.eval_gate, self.gate_mode, self.hsic_items = eval_gate, gate_mode, hsic_items
         self.n_users = n_users
 
     @property
@@ -61,6 +72,8 @@ class GBSR(nn.Module):
         return self.linear_2(F.relu(self.linear_1(cat))).view(-1)
 
     def gates(self, sample: bool):
+        if self.gate_mode == "fixed1":
+            return torch.ones(self.backbone.social.src.shape[0], device=self.backbone.emb.weight.device)
         lg = self.logits()
         if sample:
             u = torch.rand_like(lg).clamp(1e-6, 1 - 1e-6)
@@ -71,33 +84,40 @@ class GBSR(nn.Module):
     def train_step_loss(self, users, pos, neg, reg: float):
         w = self.gates(sample=True)
         rec, bpr = self.backbone.bpr_loss(users, pos, neg, reg, social_w=w)
+        if self.beta == 0:
+            return rec, {"bpr": bpr}
         eu_m, ei_m = self.backbone._last_prop
-        eu_o, ei_o = self.backbone.propagate(None)  # unmasked graph
-        uu, ii = torch.unique(users), torch.unique(pos)
-        ib = (hsic(kernel_matrix(F.normalize(eu_o[uu], dim=1), self.sigma),
-                   kernel_matrix(F.normalize(eu_m[uu], dim=1), self.sigma), self.m)
-              + hsic(kernel_matrix(F.normalize(ei_o[ii], dim=1), self.sigma),
-                     kernel_matrix(F.normalize(ei_m[ii], dim=1), self.sigma), self.m))
+        eu_o, ei_o = self.backbone.propagate(None)  # observed (unmasked) graph
+        uu = torch.unique(users)
+        ib = hsic(kernel_matrix(F.normalize(eu_o[uu], dim=1), self.sigma),
+                  kernel_matrix(F.normalize(eu_m[uu], dim=1), self.sigma), self.m)
+        if self.hsic_items:
+            ii = torch.unique(pos)
+            ib = ib + hsic(kernel_matrix(F.normalize(ei_o[ii], dim=1), self.sigma),
+                           kernel_matrix(F.normalize(ei_m[ii], dim=1), self.sigma), self.m)
         return rec + self.beta * ib, {"bpr": bpr, "hsic": ib.detach()}
 
     @torch.no_grad()
     def score_fn(self):
-        return self.backbone.score_fn(social_w=self.gates(sample=False))
+        return self.backbone.score_fn(social_w=self.gates(sample=self.eval_gate == "sample"))
 
     @torch.no_grad()
     def eval_diagnostics(self, n_pval_total=None) -> dict:
-        g = self.gates(sample=False) - self.edge_bias
+        g = self.gates(sample=False) - (0 if self.gate_mode == "fixed1" else self.edge_bias)
         return {"gate_mean": g.mean().item(), "gate_std": g.std().item(),
                 "gate_frac_lt05": (g < 0.5).float().mean().item(),
                 "gate_min": g.min().item(), "gate_max": g.max().item()}
 
     @torch.no_grad()
     def best_snapshot(self) -> dict:
-        """Noise-free gate without edge bias, averaged over the two directions of each edge."""
-        g = (self.gates(sample=False) - self.edge_bias).cpu().numpy()
-        E = self.backbone.social.n_edges
-        und = (g[:E] + g[E:]) / 2
+        """Noise-free gate without edge bias. Undirected graphs: averaged over both directions of an edge."""
+        g = (self.gates(sample=False) - (0 if self.gate_mode == "fixed1" else self.edge_bias)).cpu().numpy()
         s = self.backbone.social
+        if s.directed:
+            edges = np.stack([s.dst.cpu().numpy(), s.src.cpu().numpy()], 1)
+            return {"alpha": g, "is_obs": np.ones(len(g), bool), "in_pval": np.zeros(len(g), bool), "edges": edges}
+        E = s.n_edges
+        und = (g[:E] + g[E:]) / 2
         edges = s.src[:E].cpu().numpy(), s.dst[:E].cpu().numpy()
         return {"alpha": und, "is_obs": np.ones(E, bool), "in_pval": np.zeros(E, bool),
                 "edges": np.stack(edges, 1)}

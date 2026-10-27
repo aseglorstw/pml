@@ -1,0 +1,4 @@
+# GBSR port check, stage 1 (authors' Douban-Book split, 1 seed). walltime config arguments
+12:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0
+12:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_beta0 beta=0
+08:00:00 configs/lastfm_lightgcn.yaml --no-tune --seeds 0 --set dataset=douban_gbsr data_dir=data/processed/douban_gbsr reg=0.0001 eval_every=5 name=gbsrport_lightgcn

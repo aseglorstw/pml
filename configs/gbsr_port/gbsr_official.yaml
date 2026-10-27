@@ -1,0 +1,38 @@
+# GBSR port check on the authors' own Douban-Book split, matching the official PyTorch code
+# (github.com/yimutianyang/KDD24-GBSR, torch_version/): init N(0, 0.01), Adam 1e-3 for all parameters,
+# batch 2048 (last batch filled up to 2048), L2 1e-4 on batch ego embeddings / batch size, BPR mean,
+# 3 layers + layer mean, joint adjacency [[S, R], [R^T, 0]] with D^-1/2 A D^-1/2 (social entries directed as
+# given, self-loops kept), mask on concat(ego user i, ego user j), gate sigmoid((logit + logistic noise)/0.2)
+# + 0.5, detached, random gate also at evaluation, HSIC on L2-normalized reps (users + items, unique in
+# batch, m = batch size), loss = BPR + L2 + 40 * HSIC with sigma 2.5; evaluation every epoch, selection
+# and early stopping on testdata (ties count as improvement, stop after 11 non-improving epochs once
+# epoch > 50 in their 0-based count), max 1000 epochs.
+method: gbsr
+name: gbsrport_official
+dataset: douban_gbsr
+data_dir: data/processed/douban_gbsr
+seeds: [0]
+device: auto
+dim: 64
+n_layers: 3
+lr: 0.001
+batch_size: 2048
+reg: 0.0001
+init: random
+init_std: 0.01
+social_form: gbsr
+beta: 40
+sigma: 2.5
+edge_bias: 0.5
+gbsr_tau: 0.2
+detach_mask: true
+eval_gate: sample
+gate_mode: learned
+hsic_items: true
+max_epochs: 1000
+eval_every: 1
+patience: 11
+min_epochs: 52
+improve_ties: true
+full_last_batch: true
+eval_final: true

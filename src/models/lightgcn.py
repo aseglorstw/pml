@@ -47,12 +47,19 @@ class SocialGraph:
     and are applied to both directions, so the propagation stays symmetric.
     """
 
-    def __init__(self, edges: np.ndarray, n_users: int, device, deg: np.ndarray | None = None):
-        """deg: optional fixed per-user degree for the normalization (default: static edge count)."""
+    def __init__(self, edges: np.ndarray, n_users: int, device, deg: np.ndarray | None = None,
+                 directed: bool = False):
+        """deg: optional fixed per-user degree for the normalization (default: static edge count).
+        directed: edges are directed entries (row user u, neighbour v) used as given: u aggregates from v
+        only (official GBSR adjacency built from user_users_d; self-loops allowed)."""
         edges = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
         self.n_edges = len(edges)
-        src = np.concatenate([edges[:, 0], edges[:, 1]])
-        dst = np.concatenate([edges[:, 1], edges[:, 0]])
+        self.directed = directed
+        if directed:
+            src, dst = edges[:, 1], edges[:, 0]
+        else:
+            src = np.concatenate([edges[:, 0], edges[:, 1]])
+            dst = np.concatenate([edges[:, 1], edges[:, 0]])
         if deg is None:
             deg = np.bincount(src, minlength=n_users)
         deg = np.asarray(deg, dtype=np.float64)
@@ -66,7 +73,7 @@ class SocialGraph:
         """sum_v w_uv / sqrt(d_u d_v) e_v for every user u. Differentiable in w."""
         if w is None:
             coef = self.norm
-        elif w.shape[0] == 2 * self.n_edges:  # one weight per direction (src -> dst order)
+        elif w.shape[0] == self.src.shape[0]:  # one weight per stored direction / directed entry
             coef = self.norm * w
         else:  # one weight per undirected edge, shared by both directions
             coef = self.norm * torch.cat([w, w])
@@ -78,7 +85,8 @@ class LightGCN(nn.Module):
     def __init__(self, n_users: int, n_items: int, train: np.ndarray, dim=64, n_layers=3,
                  social_edges: np.ndarray | None = None, omega_s=0.5, device="cpu",
                  social_deg: np.ndarray | None = None, social_form: str = "ours",
-                 cand_edges: np.ndarray | None = None, omega_c: float = 0.5):
+                 cand_edges: np.ndarray | None = None, omega_c: float = 0.5,
+                 social_directed: bool = False, init_std: float = 0.1):
         """social_form:
         'ours' : eq. 8 - interaction term normalized by interaction degrees only, plus
                  omega_S * social term normalized by social degrees only (two separate channels).
@@ -90,14 +98,19 @@ class LightGCN(nn.Module):
         self.n_users, self.n_items, self.n_layers, self.omega_s = n_users, n_items, n_layers, omega_s
         self.social_form = social_form
         self.emb = nn.Embedding(n_users + n_items, dim)
-        nn.init.normal_(self.emb.weight, std=0.1)
+        nn.init.normal_(self.emb.weight, std=init_std)
         if social_form == "gbsr" and social_edges is not None:
             e = np.asarray(social_edges, dtype=np.int64).reshape(-1, 2)
-            d_soc = (np.bincount(e.ravel(), minlength=n_users).astype(np.float64)
-                     if social_deg is None else np.asarray(social_deg, dtype=np.float64))
+            if social_directed:  # row sums of the official dense adjacency: out-entries per user
+                d_soc_static = np.bincount(e[:, 0], minlength=n_users).astype(np.float64)
+            else:
+                d_soc_static = np.bincount(e.ravel(), minlength=n_users).astype(np.float64)
+            d_soc = d_soc_static if social_deg is None else np.asarray(social_deg, dtype=np.float64)
             d_int = np.bincount(np.asarray(train)[:, 0], minlength=n_users).astype(np.float64)
             self.adj = sparse_tensor(norm_bipartite_adj(train, n_users, n_items, extra_user_deg=d_soc), device)
-            self.social = SocialGraph(e, n_users, device, deg=d_int + d_soc)
+            deg = d_int + d_soc
+            deg[deg == 0] = 1.0  # as the official code (D[D == 0] = 1)
+            self.social = SocialGraph(e, n_users, device, deg=deg, directed=social_directed)
             self.omega_s = 1.0
         elif social_form in ("ours", "gbsr"):
             self.adj = sparse_tensor(norm_bipartite_adj(train, n_users, n_items), device)
