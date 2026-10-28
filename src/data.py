@@ -140,7 +140,12 @@ def load_douban_book(raw_dir: str) -> Dataset:
 
     GBSR ships an 80/20 train/test split; we merge both parts and re-split with our protocol.
     """
-    folder = os.path.join(raw_dir, "gbsr_repo", "src", "datasets", "douban_book")
+    return load_gbsr_dataset(raw_dir, "douban_book")
+
+
+def load_gbsr_dataset(raw_dir: str, name: str) -> Dataset:
+    """A dataset released with GBSR (douban_book, epinions, yelp): train + test merged, re-split by us."""
+    folder = os.path.join(raw_dir, "gbsr_repo", "src", "datasets", name)
     if not os.path.exists(folder):
         raise FileNotFoundError(f"clone {GBSR_REPO} into {os.path.join(raw_dir, 'gbsr_repo', 'src')}")
     pairs = []

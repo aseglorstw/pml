@@ -26,7 +26,7 @@ from sklearn.metrics import roc_auc_score
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT)
-from src.pugib_prep import cosine_on_pairs, isin_pairs, pair_keys  # noqa: E402
+from src.pugib_prep import adjacency, cosine_on_pairs, isin_pairs, pair_keys  # noqa: E402
 
 QUANTILES = (0.05, 0.1, 0.2, 0.3)
 
@@ -49,9 +49,17 @@ def process(ds, seed, n_rand, variant):
     d = os.path.join(ROOT, "data/processed", ds, f"seed_{seed}")
     n = json.load(open(os.path.join(d, "meta.json")))["n_users"]
     e = np.loadtxt(os.path.join(d, "social_train.txt"), dtype=np.int64, ndmin=2)
-    emb = torch.load(os.path.join(d, "pugib", variant, "embeddings.pt"), map_location="cpu")["user_final"].numpy()
-    om = np.load(os.path.join(d, "pugib", "omega.npz"))
-    in_omega = np.isin(pair_keys(e, n), pair_keys(om["pairs"].astype(np.int64), n))
+    emb_path = os.path.join(d, "pugib", variant, "embeddings.pt")
+    if not os.path.exists(emb_path):  # no PU-GIB preprocessing: use the interaction-only LightGCN checkpoint
+        emb_path = os.path.join(ROOT, "results/checkpoints", f"lightgcn_{ds}_seed{seed}.pt")
+    emb = torch.load(emb_path, map_location="cpu")["user_final"].numpy()
+    om_path = os.path.join(d, "pugib", "omega.npz")
+    if os.path.exists(om_path):
+        om = np.load(om_path)
+        in_omega = np.isin(pair_keys(e, n), pair_keys(om["pairs"].astype(np.int64), n))
+    else:  # Omega not built (large graphs): a tie is in Omega iff its endpoints share a training neighbour
+        A = adjacency(e, n)
+        in_omega = np.asarray(A[e[:, 0]].multiply(A[e[:, 1]]).sum(1)).ravel() > 0
     rng = np.random.default_rng([seed, 7])
     r = np.sort(rng.integers(0, n, (n_rand, 2)), 1)
     r = r[r[:, 0] != r[:, 1]]
@@ -79,6 +87,7 @@ def process(ds, seed, n_rand, variant):
                          "map_true_lost": float((true & ~keep).sum() / true.sum()),
                          "map_false_share_left": float((~true[keep]).mean())}
     out = os.path.join(d, "pugib")
+    os.makedirs(out, exist_ok=True)
     np.savez_compressed(os.path.join(out, "mixture_prior.npz"), edges=e, rho=rho, in_omega=in_omega,
                         q_hat=np.array([info["groups"].get(g, {}).get("q_hat", np.nan) for g in ("in_omega", "bridges")]))
     np.savetxt(os.path.join(out, "map_prior.txt"), e[keep], fmt="%d")

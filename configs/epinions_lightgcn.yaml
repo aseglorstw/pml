@@ -1,0 +1,16 @@
+# Interaction-only LightGCN on epinions (GBSR release, our split). Supplies ẽ and s for the mixture prior and is the
+# no-social reference. L2 weight 1e-4 as tuned on Douban-Book (no tuning, to save time).
+method: lightgcn
+dataset: epinions
+data_dir: data/processed/epinions
+seeds: [0, 1, 2]
+device: auto
+dim: 64
+n_layers: 3
+lr: 0.001
+batch_size: 2048
+reg: 0.0001
+max_epochs: 1500
+eval_every: 5
+patience: 10
+save_checkpoint: true
