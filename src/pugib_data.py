@@ -65,17 +65,28 @@ def load_pugib_inputs(split: Split, seed_dir: str, cfg: dict) -> dict:
     with open(os.path.join(vdir, "priors.json")) as f:
         priors = json.load(f)
     # LightGCN-PU has no prior (all weights 1); rho is then unused
-    if "prior" in cfg:
-        rho_obs, rho_un, pinfo = prior_values(priors, cfg)
+    if cfg.get("prior") == "mixture":
+        # per-tie prior of observed ties from scripts/mixture_prior.py (noise share vs random pairs, separately
+        # inside Omega and on bridges); candidates keep the anchored rho_un at the given kappa
+        mp = np.load(os.path.join(pdir, "mixture_prior.npz"))
+        assert np.array_equal(mp["edges"], train), "mixture_prior.npz does not match social_train"
+        _, rho_un, _ = prior_values(priors, {**cfg, "prior": "anchor"})
+        rho_obs = float(mp["rho"].mean())
+        pinfo = {"prior_used": "mixture", "q_hat_in_omega": float(mp["q_hat"][0]),
+                 "q_hat_bridges": float(mp["q_hat"][1])}
+        rho = np.concatenate([mp["rho"].astype(np.float64), np.full(len(pool), rho_un)])
     else:
-        rho_obs, rho_un, pinfo = 1.0, 1.0, {}
-    rho = np.where(is_obs, rho_obs, rho_un)
+        if "prior" in cfg:
+            rho_obs, rho_un, pinfo = prior_values(priors, cfg)
+        else:
+            rho_obs, rho_un, pinfo = 1.0, 1.0, {}
+        rho = np.where(is_obs, rho_obs, rho_un)
 
     ck = torch.load(os.path.join(vdir, "embeddings.pt"), map_location="cpu")
     in_pest = np.where(found, om["in_pest"][pos], False) if "in_pest" in om else np.zeros(len(support), bool)
     in_prec = np.where(found, om["in_prec"][pos], False) if "in_prec" in om else isin_pairs(support, split.social_val, n)
     n_prec_total = int(om["in_prec"].sum()) if "in_prec" in om else int(om["in_pval"].sum())
-    return {"support": support, "n_obs": int(len(train)), "is_obs": is_obs, "r": r, "rho": rho,
+    return {"support": support, "n_obs": int(len(train)), "is_obs": is_obs, "r": r, "rho": rho, "in_omega": found,
             "rho_obs": rho_obs, "rho_un": rho_un, "prior_info": pinfo,
             "e_tilde": ck["user_final"].numpy(), "ego": ck["ego"],
             "in_prec": in_prec, "in_pest": in_pest, "in_pval": in_prec | in_pest,

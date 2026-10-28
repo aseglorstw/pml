@@ -125,11 +125,21 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
                              omega_c=cfg.get("omega_c", 0.25), init_std=cfg.get("init_std", 0.1), **common)
         else:
             from .pugib_prep import cosine_on_pairs
-            feats = pair_features(inp["e_tilde"], inp["support"], inp["r"], inp["is_obs"])
+            feats = pair_features(inp["e_tilde"], inp["support"], inp["r"], inp["is_obs"],
+                                  use_ra=cfg.get("feat_ra", True),
+                                  in_omega=inp["in_omega"] if cfg.get("feat_in_omega") else None)
+            # bridges = observed ties outside Omega (no common neighbour); by default they get rho_obs
+            bridge = inp["is_obs"] & ~inp["in_omega"]
+            rho = np.array(inp["rho"], dtype=np.float64)
+            if cfg.get("bridge_prior") is not None:
+                rho[bridge] = float(cfg["bridge_prior"])
+            kl_weight = None if cfg.get("kl_bridges", True) else (~bridge).astype(np.float64)
+            extra.update({k: cfg[k] for k in ("feat_ra", "feat_in_omega", "bridge_prior", "kl_bridges") if k in cfg})
+            extra["n_bridges"] = int(bridge.sum())
             tau_epochs = cfg.get("tau_epochs", cfg["max_epochs"])
             if tau_epochs in (None, "auto"):  # anneal over the whole training budget
                 tau_epochs = cfg["max_epochs"]
-            model = PUGIB(split.n_users, split.n_items, split.train, inp["support"], inp["n_obs"], inp["rho"], feats,
+            model = PUGIB(split.n_users, split.n_items, split.train, inp["support"], inp["n_obs"], rho, feats,
                           omega_c=cfg.get("omega_c", 0.25), beta=cfg["beta"],
                           hsic_lambda=cfg.get("hsic_lambda", 0.0), hsic_sigma=cfg.get("hsic_sigma", 2.5),
                           hsic_items=cfg.get("hsic_items", True), batch_size=cfg["batch_size"],
@@ -137,7 +147,8 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
                           tau_end=cfg.get("tau_end", 0.2), tau_epochs=int(tau_epochs),
                           in_prec=inp["in_prec"], in_pest=inp["in_pest"],
                           pair_s=cosine_on_pairs(inp["e_tilde"], inp["support"]), pair_r=inp["r"],
-                          social_form=social_form, init_std=cfg.get("init_std", 0.1), **common)
+                          social_form=social_form, init_std=cfg.get("init_std", 0.1), kl_weight=kl_weight,
+                          **common)
     else:
         raise ValueError(method)
     # Global social weight omega: multiplies every observed-tie entry of the normalized adjacency, on top of
@@ -148,6 +159,17 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         if sg is not None:
             sg.norm = sg.norm * float(omega)
             extra["social_omega"] = float(omega)
+    # social_keep_file (LightGCN-S): training ties not listed get weight 0 in the normalized adjacency, while
+    # the degrees stay those of the full training graph (no renormalization).
+    if cfg.get("social_keep_file") and method == "lightgcn_s":
+        from .pugib_prep import isin_pairs
+        keep_e = np.loadtxt(os.path.join(root, cfg["social_keep_file"]), dtype=np.int64, ndmin=2)
+        st = np.sort(np.asarray(social_train, dtype=np.int64), 1)
+        keep = isin_pairs(st, np.sort(keep_e, 1), split.n_users).astype(np.float32)
+        sg = model.social
+        assert not sg.directed and sg.norm.shape[0] == 2 * len(keep)
+        sg.norm = sg.norm * torch.as_tensor(np.concatenate([keep, keep]), device=sg.norm.device)
+        extra.update({"social_keep_file": cfg["social_keep_file"], "n_kept": int(keep.sum())})
     # Cold start (random init) is the default for every method, as in the paper; `init: e_tilde` warm-starts
     # from the best LightGCN checkpoint (earlier experiments). The LightGCN checkpoint also supplies ẽ and s.
     init = cfg.get("init", "random")

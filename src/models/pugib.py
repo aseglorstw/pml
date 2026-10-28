@@ -26,11 +26,18 @@ def binary_concrete(logits: torch.Tensor, tau: float) -> torch.Tensor:
     return torch.sigmoid((logits + u.log() - (1 - u).log()) / tau)
 
 
-def pair_features(emb: np.ndarray, pairs: np.ndarray, r: np.ndarray, is_obs: np.ndarray) -> np.ndarray:
-    """[e_i + e_j, |e_i - e_j|, e_i * e_j, log(1 + r), A]  -- symmetric in (i, j)."""
+def pair_features(emb: np.ndarray, pairs: np.ndarray, r: np.ndarray, is_obs: np.ndarray,
+                  use_ra: bool = True, in_omega: np.ndarray | None = None) -> np.ndarray:
+    """[e_i + e_j, |e_i - e_j|, e_i * e_j, log(1 + r), A]  -- symmetric in (i, j).
+    use_ra=False drops the log(1 + r) column; in_omega (bool per pair) appends a 'pair is in Omega' column."""
     ei, ej = emb[pairs[:, 0]], emb[pairs[:, 1]]
-    f = np.concatenate([ei + ej, np.abs(ei - ej), ei * ej, np.log1p(r)[:, None],
-                        is_obs.astype(np.float64)[:, None]], 1)
+    cols = [ei + ej, np.abs(ei - ej), ei * ej]
+    if use_ra:
+        cols.append(np.log1p(r)[:, None])
+    cols.append(is_obs.astype(np.float64)[:, None])
+    if in_omega is not None:
+        cols.append(np.asarray(in_omega, dtype=np.float64)[:, None])
+    f = np.concatenate(cols, 1)
     # column standardization: a fixed affine map per column, so symmetry is preserved
     mu, sd = f.mean(0), f.std(0)
     sd[sd < 1e-8] = 1.0
@@ -52,7 +59,10 @@ class PUGIB(nn.Module):
     def __init__(self, n_users, n_items, train, support, n_obs, rho, feats, dim=64, n_layers=3,
                  omega_s=1.0, omega_c=0.25, beta=0.001, hsic_lambda=0.0, hsic_sigma=2.5, hsic_items=True,
                  batch_size=2048, hidden=64, tau_start=1.0, tau_end=0.2, tau_epochs=800, device="cpu",
-                 in_prec=None, in_pest=None, pair_s=None, pair_r=None, social_form="gbsr", init_std=0.1):
+                 in_prec=None, in_pest=None, pair_s=None, pair_r=None, social_form="gbsr", init_std=0.1,
+                 kl_weight=None):
+        """kl_weight: optional per-tie weight of the KL term (e.g. 0 for ties without a prior); the KL term is
+        sum(w * KL) / |C|, so the default (all ones) is the mean over C."""
         super().__init__()
         support = np.asarray(support, dtype=np.int64)
         obs, cand = support[:n_obs], support[n_obs:]
@@ -63,6 +73,8 @@ class PUGIB(nn.Module):
         z = np.zeros(len(support), bool)
         self.register_buffer("feats", torch.as_tensor(feats))
         self.register_buffer("rho", torch.as_tensor(np.asarray(rho, dtype=np.float64), dtype=torch.float32))
+        kw = np.ones(len(support)) if kl_weight is None else np.asarray(kl_weight, dtype=np.float64)
+        self.register_buffer("kl_weight", torch.as_tensor(kw, dtype=torch.float32))
         is_obs = np.zeros(len(support), bool)
         is_obs[:n_obs] = True
         self.register_buffer("is_obs", torch.as_tensor(is_obs))
@@ -96,7 +108,7 @@ class PUGIB(nn.Module):
         alpha = torch.sigmoid(lg)
         z_obs, z_cand = self._split(binary_concrete(lg, self.tau))  # one sample per undirected tie
         rec, bpr = self.backbone.bpr_loss(users, pos, neg, reg, social_w=z_obs, cand_w=z_cand)
-        kl = kl_bernoulli(alpha, self.rho).mean()
+        kl = (kl_bernoulli(alpha, self.rho) * self.kl_weight).mean()
         loss, parts = rec + self.beta * kl, {"bpr": bpr, "kl": kl.detach()}
         if self.hsic_lambda > 0:
             from .gbsr import hsic, kernel_matrix

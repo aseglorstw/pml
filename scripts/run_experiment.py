@@ -74,7 +74,19 @@ def save_peruser(cfg, s, res):
     np.savez_compressed(os.path.join(d, f"seed{s}.npz"), **pu)
 
 
+def save_state(cfg, s, res):
+    """save_state: true -> full model state_dict of the best checkpoint (rebuild with build_model, then load)."""
+    if not cfg.get("save_state") or "model" not in res:
+        return
+    import torch
+    d = os.path.join(ROOT, "results/checkpoints/state")
+    os.makedirs(d, exist_ok=True)
+    torch.save({"state": res["model"].state_dict(), "cfg": {k: v for k, v in cfg.items() if k != "tune"}, "seed": s},
+               os.path.join(d, f"{cfg.get('name', cfg['method'])}_seed{s}.pt"))
+
+
 def finalize(cfg, s, res, tag):
+    save_state(cfg, s, res)
     log_result(cfg, s, res, ROOT, extra={"stage": "final"})
     save_peruser(cfg, s, res)
     write_run_diag(cfg, s, res, "final", tag)
