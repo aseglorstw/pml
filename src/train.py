@@ -159,6 +159,14 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
         if sg is not None:
             sg.norm = sg.norm * float(omega)
             extra["social_omega"] = float(omega)
+    # social_weights_file: one weight per row of the social edge list (e.g. SHaRe's normalized similarity),
+    # multiplied into the normalized adjacency on top of omega (and of GBSR's gate)
+    if cfg.get("social_weights_file"):
+        sw = np.loadtxt(os.path.join(root, cfg["social_weights_file"]), dtype=np.float64, ndmin=1)
+        sg = getattr(model, "social", None) or getattr(getattr(model, "backbone", None), "social", None)
+        assert sg is not None and not sg.directed and sg.norm.shape[0] == 2 * len(sw), "weights do not match edges"
+        sg.norm = sg.norm * torch.as_tensor(np.concatenate([sw, sw]), dtype=torch.float32, device=sg.norm.device)
+        extra["social_weights_file"] = cfg["social_weights_file"]
     # social_keep_file (LightGCN-S): training ties not listed get weight 0 in the normalized adjacency, while
     # the degrees stay those of the full training graph (no renormalization).
     if cfg.get("social_keep_file") and method == "lightgcn_s":
