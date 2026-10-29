@@ -82,11 +82,13 @@ def share_graphs(ds, s, block=512):
     return {"ties": int(len(e)), "share_cut": M, "share_added": int(len(add)), "share_mean_weight": float(w.mean())}
 
 
-def targeted_add(ds, s, k=1, max_deg=2):
-    """Smart addition for users with 1..max_deg training ties: the structure proposes, the taste prior verifies.
-    For each such user the top-k two-hop candidates by Resource Allocation (computed on the training graph) are
-    proposed; a candidate is added to the MAP graph only if its mixture posterior rho(s) >= 0.5, with the noise
-    share and density ratio of the observed ties inside Omega (candidates share a friend by construction)."""
+def targeted_add(ds, s, k=1, max_deg=2, thr=0.5, source="ra", tag=""):
+    """Smart addition for users with 1..max_deg training ties: a proposer suggests candidates, the taste prior verifies.
+    source 'ra': top-k two-hop candidates by Resource Allocation on the training graph (structure proposes);
+    source 's' : top-k unlinked users by taste similarity s (as SHaRe, but only for these users).
+    A candidate is added to the MAP graph only if its mixture posterior rho(s) >= thr, computed with the noise share
+    and density ratio of the observed ties of its own group (inside Omega or bridge), as in scripts/mixture_prior.py.
+    Writes pugib/map_add{_tag}.txt and .json."""
     import scipy.sparse as sp
     import torch
     from sklearn.isotonic import IsotonicRegression
@@ -101,39 +103,80 @@ def targeted_add(ds, s, k=1, max_deg=2):
     z = emb / np.maximum(np.linalg.norm(emb, axis=1, keepdims=True), 1e-12)
     A = adjacency(e, n).tocsr()
     deg = np.asarray(A.sum(1)).ravel()
-    W = (A @ sp.diags(1 / np.maximum(deg, 1)) @ A).tocsr()
     tgt = np.where((deg >= 1) & (deg <= max_deg))[0]
     cand = []
-    for u in tgt:
-        row = W[u].toarray().ravel()
-        row[u] = 0
-        row[A[u].indices] = 0
-        nz = np.flatnonzero(row)
-        if len(nz):
-            cand += [(min(u, x), max(u, x)) for x in nz[np.argsort(-row[nz])[:k]]]
+    if source == "ra":
+        W = (A @ sp.diags(1 / np.maximum(deg, 1)) @ A).tocsr()
+        for u in tgt:
+            row = W[u].toarray().ravel()
+            row[u] = 0
+            row[A[u].indices] = 0
+            nz = np.flatnonzero(row)
+            if len(nz):
+                cand += [(min(u, x), max(u, x)) for x in nz[np.argsort(-row[nz])[:k]]]
+    else:
+        for b0 in range(0, len(tgt), 1024):
+            us = tgt[b0:b0 + 1024]
+            C = z[us] @ z.T
+            C[np.arange(len(us)), us] = -np.inf
+            sub = A[us].tocoo()
+            C[sub.row, sub.col] = -np.inf
+            top = np.argpartition(-C, k, axis=1)[:, :k]
+            cand += [(min(u, x), max(u, x)) for u, xs in zip(us, top) for x in xs]
     cand = np.unique(np.array(cand, dtype=np.int64).reshape(-1, 2), axis=0)
-    # posterior of the in-Omega group, fitted as in scripts/mixture_prior.py
+    # group posteriors fitted on the observed ties (inside Omega / bridges) against random pairs
     mp = np.load(os.path.join(d, "pugib/mixture_prior.npz"))
     inom = mp["in_omega"]
-    s_obs = np.einsum("ij,ij->i", z[e[inom, 0]], z[e[inom, 1]])
     rng = np.random.default_rng([s, 7])
     r = np.sort(rng.integers(0, n, (200000, 2)), 1)
     r = r[r[:, 0] != r[:, 1]]
     r = r[~isin_pairs(r, e, n)]
     s_rand = np.einsum("ij,ij->i", z[r[:, 0]], z[r[:, 1]])
-    q, _ = noise_share(s_obs, s_rand)
-    iso = IsotonicRegression(increasing=True, out_of_bounds="clip", y_min=1e-9, y_max=1 - 1e-9).fit(
-        np.concatenate([s_obs, s_rand]), np.concatenate([np.ones(len(s_obs)), np.zeros(len(s_rand))]))
-    s_c = np.einsum("ij,ij->i", z[cand[:, 0]], z[cand[:, 1]]) if len(cand) else np.zeros(0)
-    h = iso.predict(s_c) if len(cand) else np.zeros(0)
-    post = np.clip(1 - q * (1 - h) / h * len(s_obs) / len(s_rand), 0, 1)
-    acc = cand[post >= 0.5]
+    post = np.zeros(len(cand))
+    if len(cand):
+        s_c = np.einsum("ij,ij->i", z[cand[:, 0]], z[cand[:, 1]])
+        c_in = np.asarray(A[cand[:, 0]].multiply(A[cand[:, 1]]).sum(1)).ravel() > 0
+        for grp, cm in ((inom, c_in), (~inom, ~c_in)):
+            if grp.sum() < 10 or cm.sum() == 0:
+                continue
+            s_obs = np.einsum("ij,ij->i", z[e[grp, 0]], z[e[grp, 1]])
+            q, _ = noise_share(s_obs, s_rand)
+            iso = IsotonicRegression(increasing=True, out_of_bounds="clip", y_min=1e-9, y_max=1 - 1e-9).fit(
+                np.concatenate([s_obs, s_rand]), np.concatenate([np.ones(len(s_obs)), np.zeros(len(s_rand))]))
+            h = iso.predict(s_c[cm])
+            post[cm] = np.clip(1 - q * (1 - h) / h * len(s_obs) / len(s_rand), 0, 1)
+    acc = cand[post >= thr]
     mapg = np.loadtxt(os.path.join(d, "pugib/map_prior.txt"), dtype=np.int64)
-    np.savetxt(os.path.join(d, "pugib/map_add.txt"), np.concatenate([mapg, acc]), fmt="%d")
+    suffix = f"_{tag}" if tag else ""
+    np.savetxt(os.path.join(d, f"pugib/map_add{suffix}.txt"), np.concatenate([mapg, acc]), fmt="%d")
     v = np.loadtxt(os.path.join(d, "social_val.txt"), dtype=np.int64)
     hit = lambda x: int(isin_pairs(x, np.sort(v, 1), n).sum()) if len(x) else 0
-    return {"target_users": int(len(tgt)), "proposed": int(len(cand)), "accepted": int(len(acc)),
-            "proposed_heldout_hits": hit(cand), "accepted_heldout_hits": hit(acc)}
+    out = {"source": source, "k": k, "thr": thr, "target_users": int(len(tgt)), "proposed": int(len(cand)),
+           "accepted": int(len(acc)), "proposed_heldout_hits": hit(cand), "accepted_heldout_hits": hit(acc)}
+    json.dump(out, open(os.path.join(d, f"pugib/map_add{suffix}.json"), "w"), indent=2)
+    return out
+
+
+# addition grid (Epinions seed 0, picked on validation, confirmed on other seeds): tag -> (source, k, thr)
+ADD_GRID = {"ra3t50": ("ra", 3, 0.5), "ra1t80": ("ra", 1, 0.8), "ra3t80": ("ra", 3, 0.8), "s3t50": ("s", 3, 0.5)}
+
+
+def addgrid(ds, seeds):
+    lam, sig = HSIC[ds]
+    out = [f"# generated by scripts/real_study.py addgrid --dataset {ds}"]
+    for s in seeds:
+        d = sdir(ds, s)
+        for tag, (src, k, thr) in ADD_GRID.items():
+            ad = targeted_add(ds, s, k=k, thr=thr, source=src, tag=tag)
+            print(f"{ds} seed {s} {tag}: proposed {ad['proposed']} (held-out hits {ad['proposed_heldout_hits']}), "
+                  f"accepted {ad['accepted']} (hits {ad['accepted_heldout_hits']})")
+            name = f"real_{ds}_gbsr_add_{tag}_w1"
+            if not os.path.exists(os.path.join(ROOT, f"results/peruser/{ds}/{name}/seed{s}.npz")):
+                out.append(line("gbsr", name, ds, s, f"social_omega=1 social_edges_file={d}/pugib/map_add_{tag}.txt "
+                                                     f"hsic_lambda={lam} hsic_sigma={sig}"))
+    path = os.path.join(ROOT, f"configs/jobs/real_{ds}_add.txt")
+    open(path, "w").write("\n".join(out) + "\n")
+    print(f"wrote {path}: {len(out) - 1} jobs")
 
 
 def prep(ds, seeds):
@@ -143,7 +186,6 @@ def prep(ds, seeds):
         info = json.load(open(os.path.join(ROOT, sdir(ds, s), "pugib/mixture_prior.json")))
         sh = share_graphs(ds, s)
         ad = targeted_add(ds, s)
-        json.dump(ad, open(os.path.join(ROOT, sdir(ds, s), "pugib/map_add.json"), "w"), indent=2)
         g = info["groups"]
         print(f"{ds} seed {s}: ties {info['n_ties']} | noise share q̂: in Ω {g.get('in_omega', {}).get('q_hat', float('nan')):.3f} "
               f"(n {g.get('in_omega', {}).get('n', 0)}), bridges {g.get('bridges', {}).get('q_hat', float('nan')):.3f} "
@@ -197,8 +239,8 @@ def report(ds, seeds):
     lines = [f"# {ds}: GBSR on the MAP graph vs GBSR (test, best-validation checkpoint)", "",
              "Δ = paired per-user NDCG@20 difference vs GBSR on A, ± SE over users; 'users 1-2 ties' = test users with",
              "1-2 training ties (the group that receives targeted additions).", "",
-             "| method | seed | R@20 | N@20 | Δ N@20 vs GBSR(A) | Δ, users 1-2 ties | best epoch |",
-             "|---|---|---|---|---|---|---|"]
+             "| method | seed | val N@20 | R@20 | N@20 | Δ N@20 vs GBSR(A) | Δ, users 1-2 ties | best epoch |",
+             "|---|---|---|---|---|---|---|---|"]
     low = {}
     for s in seeds:
         e = np.loadtxt(os.path.join(ROOT, sdir(ds, s), "social_train.txt"), dtype=np.int64)
@@ -209,7 +251,8 @@ def report(ds, seeds):
                     ("GBSR on MAP(prior) — ours", f"real_{ds}_gbsr_map_w1"),
                     ("GBSR on MAP(prior) + targeted addition — ours", f"real_{ds}_gbsr_mapadd_w1"),
                     ("GBSR, SHaRe cut only (ablation)", f"real_{ds}_gbsr_shp_w1"),
-                    ("GBSR, SHaRe rewiring + weights", f"real_{ds}_gbsr_sh_w1")):
+                    ("GBSR, SHaRe rewiring + weights", f"real_{ds}_gbsr_sh_w1"),
+                    *[(f"MAP + addition {tag} (grid)", f"real_{ds}_gbsr_add_{tag}_w1") for tag in ADD_GRID]):
         for s in seeds:
             r = rows.get((nm, s))
             A, R = peruser(ds, nm, s), peruser(ds, ref, s)
@@ -224,10 +267,11 @@ def report(ds, seeds):
                     dl = np.array([A[x] - R[x] for x in ul])
                     dlow = f"{dl.mean():+.4f} ± {dl.std(ddof=1) / np.sqrt(len(dl)):.4f} (n {len(dl)})"
             if r is None:
-                lines.append(f"| {lab} | {s} | – | – | {delta} | {dlow} | – |")
+                if A is not None or "(grid)" not in lab:
+                    lines.append(f"| {lab} | {s} | – | – | – | {delta} | {dlow} | – |")
             else:
-                lines.append(f"| {lab} | {s} | {float(r['test_recall@20']):.4f} | {float(r['test_ndcg@20']):.4f} | "
-                             f"{delta} | {dlow} | {r['best_epoch']} |")
+                lines.append(f"| {lab} | {s} | {float(r['val_ndcg@20']):.4f} | {float(r['test_recall@20']):.4f} | "
+                             f"{float(r['test_ndcg@20']):.4f} | {delta} | {dlow} | {r['best_epoch']} |")
     if len(seeds) > 1:
         lines += ["", "Mean Δ N@20 vs GBSR(A) over seeds (± std, t = mean / (std/√n)):", ""]
         for lab, ms in summ.items():
@@ -257,8 +301,8 @@ def report(ds, seeds):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["prep", "jobs", "report"])
+    ap.add_argument("cmd", choices=["prep", "jobs", "addgrid", "report"])
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
     a = ap.parse_args()
-    {"prep": prep, "jobs": jobs, "report": report}[a.cmd](a.dataset, a.seeds)
+    {"prep": prep, "jobs": jobs, "addgrid": addgrid, "report": report}[a.cmd](a.dataset, a.seeds)
