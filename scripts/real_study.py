@@ -188,6 +188,13 @@ def prep(ds, seeds):
         info = json.load(open(os.path.join(ROOT, sdir(ds, s), "pugib/mixture_prior.json")))
         sh = share_graphs(ds, s)
         ad = targeted_add(ds, s)
+        tag = "s3t50"
+        src, k, thr = ADD_GRID[tag]
+        targeted_add(ds, s, k=k, thr=thr, source=src, tag=tag)
+        # control: the same number of ties as the MAP graph, kept at random
+        e = np.loadtxt(os.path.join(ROOT, sdir(ds, s), "social_train.txt"), dtype=np.int64)
+        keep = np.sort(np.random.default_rng([s, 11]).choice(len(e), info["map_kept"], replace=False))
+        np.savetxt(os.path.join(ROOT, sdir(ds, s), "pugib/rand_keep_map.txt"), e[keep], fmt="%d")
         g = info["groups"]
         print(f"{ds} seed {s}: ties {info['n_ties']} | noise share q̂: in Ω {g.get('in_omega', {}).get('q_hat', float('nan')):.3f} "
               f"(n {g.get('in_omega', {}).get('n', 0)}), bridges {g.get('bridges', {}).get('q_hat', float('nan')):.3f} "
@@ -210,7 +217,12 @@ def jobs(ds, seeds):
         graphs = {"A": "", "map": f"social_edges_file={d}/pugib/map_prior.txt",
                   "mapadd": f"social_edges_file={d}/pugib/map_add.txt",
                   "shp": f"social_edges_file={d}/pugib/share_prune.txt",
-                  "sh": f"social_edges_file={d}/pugib/share_edges.txt social_weights_file={d}/pugib/share_w.txt"}
+                  "sh": f"social_edges_file={d}/pugib/share_edges.txt social_weights_file={d}/pugib/share_w.txt",
+                  "rand": f"social_edges_file={d}/pugib/rand_keep_map.txt",
+                  "add_s3t50": f"social_edges_file={d}/pugib/map_add_s3t50.txt"}
+        ref = f"real_{ds}_lightgcn"
+        if not os.path.exists(os.path.join(ROOT, f"results/peruser/{ds}/{ref}/seed{s}.npz")):
+            out.append(f"- configs/{ds}_lightgcn.yaml --no-tune --seeds {s} --set name={ref} save_checkpoint=false")
         for tag, g in graphs.items():
             for om in OMEGAS:
                 wt = str(om).replace(".", "")
@@ -218,7 +230,8 @@ def jobs(ds, seeds):
                 if os.path.exists(os.path.join(ROOT, f"results/peruser/{ds}/{name}/seed{s}.npz")):
                     continue  # already finished
                 out.append(line("gbsr", name, ds, s, f"social_omega={om} {g} {h}".strip()))
-    path = os.path.join(ROOT, f"configs/jobs/real_{ds}.txt")
+    # one list per seed set, so pipelines for different seeds can run in parallel without clashing
+    path = os.path.join(ROOT, f"configs/jobs/real_{ds}_s{''.join(map(str, seeds))}.txt")
     open(path, "w").write("\n".join(out) + "\n")
     print(f"wrote {path}: {len(out) - 1} jobs")
 
@@ -254,6 +267,7 @@ def report(ds, seeds):
                     ("GBSR on MAP(prior) + targeted addition — ours", f"real_{ds}_gbsr_mapadd_w1"),
                     ("GBSR, SHaRe cut only (ablation)", f"real_{ds}_gbsr_shp_w1"),
                     ("GBSR, SHaRe rewiring + weights", f"real_{ds}_gbsr_sh_w1"),
+                    ("GBSR, random removal (same count as MAP) — control", f"real_{ds}_gbsr_rand_w1"),
                     *[(f"MAP + addition {tag} (grid)", f"real_{ds}_gbsr_add_{tag}_w1") for tag in ADD_GRID]):
         for s in seeds:
             r = rows.get((nm, s))
@@ -269,7 +283,7 @@ def report(ds, seeds):
                     dl = np.array([A[x] - R[x] for x in ul])
                     dlow = f"{dl.mean():+.4f} ± {dl.std(ddof=1) / np.sqrt(len(dl)):.4f} (n {len(dl)})"
             if r is None:
-                if A is not None or "(grid)" not in lab:
+                if A is not None or ("(grid)" not in lab and "control" not in lab):
                     lines.append(f"| {lab} | {s} | – | – | – | {delta} | {dlow} | – |")
             else:
                 lines.append(f"| {lab} | {s} | {float(r['val_ndcg@20']):.4f} | {float(r['test_recall@20']):.4f} | "

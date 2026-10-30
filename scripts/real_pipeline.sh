@@ -4,6 +4,7 @@
 #   2. mixture prior + MAP graph, SHaRe graphs   3. GBSR on A / MAP / SHaRe cut / SHaRe full (4 in parallel)
 #   4. report -> results/real_<ds>_report.md
 # Usage (in the project folder):  nohup bash scripts/real_pipeline.sh epinions 0 > results/logs/real_epinions.log 2>&1 &
+# NPAR=<n> sets the number of parallel GBSR runs (default 4).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DS=${1:?dataset}; shift
@@ -24,6 +25,6 @@ echo "$(date +%FT%T) prep"
 python scripts/real_study.py prep --dataset "$DS" --seeds $SEEDS
 python scripts/real_study.py jobs --dataset "$DS" --seeds $SEEDS
 echo "$(date +%FT%T) GBSR runs (status: results/logs/local_runner_status.log)"
-DEVICE=$DEVICE bash scripts/run_jobs_local.sh "configs/jobs/real_${DS}.txt" 4
+DEVICE=$DEVICE bash scripts/run_jobs_local.sh "configs/jobs/real_${DS}_s$(echo $SEEDS | tr -d ' ').txt" "${NPAR:-4}"
 python scripts/real_study.py report --dataset "$DS" --seeds $SEEDS
 echo "$(date +%FT%T) done"
