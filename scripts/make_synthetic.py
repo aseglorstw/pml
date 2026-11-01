@@ -71,7 +71,7 @@ def main():
         i, j = sorted(rng.integers(0, M, 2))
         if i != j and (i, j) not in zset:
             false.add((i, j))
-    A_false = np.array(sorted(false), dtype=np.int64)
+    A_false = np.array(sorted(false), dtype=np.int64).reshape(-1, 2)  # (0, 2) when false_frac = 0
     A = np.unique(np.concatenate([A_true, A_false]), axis=0)
     n_pairs = M * (M - 1) // 2
     eps_global = len(A_false) / (n_pairs - len(Z))

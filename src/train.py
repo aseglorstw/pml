@@ -215,6 +215,8 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
     extra.update({"freeze_backbone": bool(cfg.get("freeze_backbone")), "lr_emb": cfg.get("lr_emb"),
                   "n_trainable": int(sum(p.numel() for g in groups for p in g["params"]))})
     opt = torch.optim.Adam(groups) if groups else None
+    if device.startswith("cuda"):
+        torch.cuda.reset_peak_memory_stats()
     sampler = NegativeSampler(split.train, split.n_users, split.n_items, rng)
     bs, reg = cfg["batch_size"], cfg["reg"]
     best = {"val_ndcg@20": -1.0, "epoch": 0, "state": None, "diag": None, "snapshot": None}
@@ -273,6 +275,8 @@ def fit(split: Split, cfg: dict, seed: int, root: str, log=print) -> dict:
             if bad_evals >= cfg["patience"] and epoch >= cfg.get("min_epochs", 0):
                 break
 
+    if device.startswith("cuda"):  # peak GPU memory of training (before the final full-ranking evaluation)
+        extra["max_mem_mb"] = round(torch.cuda.max_memory_allocated() / 2 ** 20, 1)
     model.eval()
     if cfg.get("eval_final") and best["state"] is not None:  # metrics of the LAST epoch, for comparison
         extra["final_epoch"] = epoch
