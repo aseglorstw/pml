@@ -1,10 +1,12 @@
 #!/bin/bash
 # Run the OFFICIAL GBSR code (PyTorch version), unmodified, on its own Douban-Book data and split.
 #   bash scripts/run_official_gbsr.sh [beta sigma runid] ...   (default: "40 2.5 paper" then "0 2.5 nohsic")
+#   DATASET=epinions bash scripts/run_official_gbsr.sh "3 0.25 paper" "0 0.25 nohsic"
+#   DATASET=yelp     bash scripts/run_official_gbsr.sh "2 0.25 paper" "0 0.25 nohsic"
 # Clones github.com/yimutianyang/KDD24-GBSR at commit 881d712 into external/ (git-ignored), creates its own
 # venv (.venv_gbsr: same torch build + numba, faiss-cpu, tqdm), runs from torch_version/ as in its README.
 # Their code: 1000 max epochs, evaluation on the TEST file every epoch, early stop after 10 non-improving
-# epochs (after epoch 50), test metrics of that best epoch. Logs: external/KDD24-GBSR/saved/douban_book/GBSR/<runid>/training.txt
+# epochs (after epoch 50), test metrics of that best epoch. Logs: external/KDD24-GBSR/saved/<dataset>/GBSR/<runid>/training.txt
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOTDIR=$(pwd)
@@ -24,12 +26,13 @@ if [ ! -x .venv_gbsr/bin/python ]; then
   .venv_gbsr/bin/pip install -q --no-cache-dir numpy scipy numba faiss-cpu tqdm scikit-learn
 fi
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4} KMP_DUPLICATE_LIB_OK=TRUE   # faiss + torch OpenMP; no code change
+DS=${DATASET:-douban_book}
 RUNS=("$@"); [ ${#RUNS[@]} -eq 0 ] && RUNS=("40 2.5 paper" "0 2.5 nohsic")
 cd external/KDD24-GBSR/torch_version
 for r in "${RUNS[@]}"; do
   read -r BETA SIGMA RID <<< "$r"
-  echo "$(date +%FT%T) official GBSR start beta=$BETA sigma=$SIGMA runid=$RID" | tee -a "$ROOTDIR/results/logs/official_gbsr_status.log"
-  "$ROOTDIR/.venv_gbsr/bin/python" -u run_GBSR.py --dataset douban_book --runid "$RID" --beta "$BETA" --sigma "$SIGMA" \
-     > "$ROOTDIR/results/logs/official_gbsr_${RID}.log" 2>&1
-  echo "$(date +%FT%T) official GBSR end runid=$RID exit $?" | tee -a "$ROOTDIR/results/logs/official_gbsr_status.log"
+  echo "$(date +%FT%T) official GBSR start dataset=$DS beta=$BETA sigma=$SIGMA runid=$RID" | tee -a "$ROOTDIR/results/logs/official_gbsr_status.log"
+  "$ROOTDIR/.venv_gbsr/bin/python" -u run_GBSR.py --dataset "$DS" --runid "$RID" --beta "$BETA" --sigma "$SIGMA" \
+     > "$ROOTDIR/results/logs/official_gbsr_${DS}_${RID}.log" 2>&1
+  echo "$(date +%FT%T) official GBSR end dataset=$DS runid=$RID exit $?" | tee -a "$ROOTDIR/results/logs/official_gbsr_status.log"
 done

@@ -1,0 +1,10 @@
+# GBSR port check on the authors' Epinions and Yelp splits (1 seed; selection on their test file, as the official code).
+# HSIC weight / kernel width from the GBSR README: Epinions beta 3, sigma 0.25; Yelp beta 2, sigma 0.25.
+# Needs: python scripts/make_gbsr_split.py --dataset epinions ; ... --dataset yelp
+# walltime config arguments
+24:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_epinions_official dataset=epinions_gbsr data_dir=data/processed/epinions_gbsr beta=3 sigma=0.25
+24:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_epinions_beta0 dataset=epinions_gbsr data_dir=data/processed/epinions_gbsr beta=0 sigma=0.25
+12:00:00 configs/lastfm_lightgcn.yaml --no-tune --seeds 0 --set dataset=epinions_gbsr data_dir=data/processed/epinions_gbsr reg=0.0001 eval_every=5 name=gbsrport_epinions_lightgcn save_checkpoint=false
+24:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_yelp_official dataset=yelp_gbsr data_dir=data/processed/yelp_gbsr beta=2 sigma=0.25
+24:00:00 configs/gbsr_port/gbsr_official.yaml --seeds 0 --set name=gbsrport_yelp_beta0 dataset=yelp_gbsr data_dir=data/processed/yelp_gbsr beta=0 sigma=0.25
+12:00:00 configs/lastfm_lightgcn.yaml --no-tune --seeds 0 --set dataset=yelp_gbsr data_dir=data/processed/yelp_gbsr reg=0.0001 eval_every=5 name=gbsrport_yelp_lightgcn save_checkpoint=false

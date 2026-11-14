@@ -6,8 +6,14 @@ linked in the full observed graph (train or held-out). The injected ties are lis
 The interaction-only LightGCN does not depend on the social graph, so its checkpoint is reused
 (results/checkpoints/lightgcn_<ds>_seed<k>.pt is copied to lightgcn_<ds>_n<pct>_seed<k>.pt).
 
+Harder noise (--kind, same layout, scripts/hard_noise_study.py for the samplers):
+  fof     -> <ds>_fof<pct>: uniformly random unlinked friends of friends (>= 1 common neighbour in the training graph);
+  triadic -> <ds>_tri<pct>: triadic closure, a random friend of a random friend.
+Default --kind uniform keeps the original sampler (and the existing <ds>_n<pct> copies) unchanged.
+
 Usage (where the checkpoints are, i.e. on the cluster):
   python scripts/make_noisy_real.py --dataset epinions --fracs 0.5 1.0 --seeds 0
+  python scripts/make_noisy_real.py --dataset epinions --fracs 0.5 --seeds 0 1 2 --kind fof
 """
 import argparse
 import json
@@ -19,6 +25,7 @@ import numpy as np
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from src.pugib_prep import isin_pairs  # noqa: E402
 
 
@@ -27,9 +34,11 @@ def main():
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--fracs", type=float, nargs="+", default=[0.5, 1.0])
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
+    ap.add_argument("--kind", choices=["uniform", "fof", "triadic"], default="uniform")
     a = ap.parse_args()
+    prefix = {"uniform": "n", "fof": "fof", "triadic": "tri"}[a.kind]
     for frac in a.fracs:
-        name = f"{a.dataset}_n{int(round(frac * 100))}"
+        name = f"{a.dataset}_{prefix}{int(round(frac * 100))}"
         for s in a.seeds:
             src = os.path.join(ROOT, "data/processed", a.dataset, f"seed_{s}")
             dst = os.path.join(ROOT, "data/processed", name, f"seed_{s}")
@@ -42,19 +51,25 @@ def main():
             va = np.loadtxt(os.path.join(src, "social_val.txt"), dtype=np.int64)
             observed = np.concatenate([tr, va])
             k = int(round(frac * len(tr)))
-            rng = np.random.default_rng([s, 13, int(round(frac * 100))])
-            inj = np.zeros((0, 2), np.int64)
-            while len(inj) < k:
-                p = np.sort(rng.integers(0, n, (2 * (k - len(inj)) + 1000, 2)), 1)
-                p = p[p[:, 0] != p[:, 1]]
-                p = p[~isin_pairs(p, observed, n)]
-                inj = np.unique(np.concatenate([inj, p]), axis=0)
-            inj = inj[rng.permutation(len(inj))[:k]]
+            if a.kind == "uniform":
+                rng = np.random.default_rng([s, 13, int(round(frac * 100))])
+                inj = np.zeros((0, 2), np.int64)
+                while len(inj) < k:
+                    p = np.sort(rng.integers(0, n, (2 * (k - len(inj)) + 1000, 2)), 1)
+                    p = p[p[:, 0] != p[:, 1]]
+                    p = p[~isin_pairs(p, observed, n)]
+                    inj = np.unique(np.concatenate([inj, p]), axis=0)
+                inj = inj[rng.permutation(len(inj))[:k]]
+            else:
+                from hard_noise_study import canon, inject  # noqa: E402
+                rng = np.random.default_rng([s, 13, int(round(frac * 100)), 1 if a.kind == "fof" else 2])
+                inj = inject(a.kind, canon(tr), canon(va), n, k, rng)
             st = np.concatenate([tr, inj])
             st = st[np.lexsort((st[:, 1], st[:, 0]))]
             np.savetxt(os.path.join(dst, "social_train.txt"), st, fmt="%d")
             np.savetxt(os.path.join(dst, "truth", "injected.txt"), inj, fmt="%d")
-            meta.update({"n_social_train": int(len(st)), "injected": k, "injected_frac": frac, "base_dataset": a.dataset})
+            meta.update({"n_social_train": int(len(st)), "injected": k, "injected_frac": frac, "base_dataset": a.dataset,
+                         "injected_kind": a.kind})
             json.dump(meta, open(os.path.join(dst, "meta.json"), "w"), indent=2)
             ck = os.path.join(ROOT, "results/checkpoints", f"lightgcn_{a.dataset}_seed{s}.pt")
             if os.path.exists(ck):

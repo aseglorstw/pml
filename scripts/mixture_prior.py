@@ -12,7 +12,13 @@ Omega and for bridges (outside Omega):
 Writes data/processed/<ds>/seed_<k>/pugib/mixture_prior.npz (edges = social_train order, rho, in_omega,
 q_hat) and map_prior.txt (ties with rho >= 0.5). Compares with the truth when truth/Z.txt exists.
 
-Usage: python scripts/mixture_prior.py --dataset synth50 --seeds 0
+Variants (ablations / extension; written under a tag, e.g. mixture_prior_matched.npz, map_prior_matched.txt):
+  --reference matched : each group gets its own reference: unlinked pairs with >= 1 common neighbour for triangle
+                        ties, unlinked pairs without one for bridges (default: uniform random pairs for both);
+  --pooled            : one group for all ties.
+Every run also writes rho{_tag}.txt (one posterior per social_train row, for the soft-weight ablation).
+
+Usage: python scripts/mixture_prior.py --dataset synth50 --seeds 0 [--reference matched] [--pooled] [--tag NAME]
 """
 import argparse
 import json
@@ -26,7 +32,7 @@ from sklearn.metrics import roc_auc_score
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT)
-from src.pugib_prep import adjacency, cosine_on_pairs, isin_pairs, pair_keys  # noqa: E402
+from src.pugib_prep import adjacency, build_omega, cosine_on_pairs, isin_pairs, pair_keys  # noqa: E402
 
 QUANTILES = (0.05, 0.1, 0.2, 0.3)
 
@@ -45,7 +51,7 @@ def posterior(s_obs, s_rand, q):
     return np.clip(1 - q * ratio_rand_obs, 0.0, 1.0)
 
 
-def process(ds, seed, n_rand, variant):
+def process(ds, seed, n_rand, variant, reference="uniform", pooled=False, tag=""):
     d = os.path.join(ROOT, "data/processed", ds, f"seed_{seed}")
     n = json.load(open(os.path.join(d, "meta.json")))["n_users"]
     e = np.loadtxt(os.path.join(d, "social_train.txt"), dtype=np.int64, ndmin=2)
@@ -65,14 +71,25 @@ def process(ds, seed, n_rand, variant):
     r = r[r[:, 0] != r[:, 1]]
     r = r[~isin_pairs(r, e, n)]
     s_obs, s_rand = cosine_on_pairs(emb, e), cosine_on_pairs(emb, r)
+    ref = {"in_omega": s_rand, "bridges": s_rand, "all": s_rand}
+    if reference == "matched":
+        A = adjacency(e, n).tocsr()
+        th = build_omega(A)
+        th = th[~isin_pairs(th, e, n)]  # unlinked pairs with >= 1 common neighbour
+        if len(th) > n_rand:
+            th = th[np.sort(rng.choice(len(th), n_rand, replace=False))]
+        cn_r = np.asarray(A[r[:, 0]].multiply(A[r[:, 1]]).sum(1)).ravel()
+        ref = {"in_omega": cosine_on_pairs(emb, th), "bridges": s_rand[cn_r == 0], "all": s_rand}
     rho = np.zeros(len(e))
-    info = {"dataset": ds, "seed": seed, "n_ties": int(len(e)), "n_random_pairs": int(len(r)), "groups": {}}
-    for name, m in (("in_omega", in_omega), ("bridges", ~in_omega)):
+    info = {"dataset": ds, "seed": seed, "n_ties": int(len(e)), "n_random_pairs": int(len(r)), "groups": {},
+            "reference": reference, "pooled": pooled}
+    groups = (("all", np.ones(len(e), bool)),) if pooled else (("in_omega", in_omega), ("bridges", ~in_omega))
+    for name, m in groups:
         if m.sum() == 0:
             continue
-        q, ratios = noise_share(s_obs[m], s_rand)
-        rho[m] = posterior(s_obs[m], s_rand, q)
-        info["groups"][name] = {"n": int(m.sum()), "q_hat": q, "ratios": ratios}
+        q, ratios = noise_share(s_obs[m], ref[name])
+        rho[m] = posterior(s_obs[m], ref[name], q)
+        info["groups"][name] = {"n": int(m.sum()), "q_hat": q, "ratios": ratios, "n_reference": int(len(ref[name]))}
     keep = rho >= 0.5
     info["map_kept"] = int(keep.sum())
     tz = os.path.join(d, "truth", "Z.txt")
@@ -88,10 +105,14 @@ def process(ds, seed, n_rand, variant):
                          "map_false_share_left": float((~true[keep]).mean())}
     out = os.path.join(d, "pugib")
     os.makedirs(out, exist_ok=True)
-    np.savez_compressed(os.path.join(out, "mixture_prior.npz"), edges=e, rho=rho, in_omega=in_omega,
-                        q_hat=np.array([info["groups"].get(g, {}).get("q_hat", np.nan) for g in ("in_omega", "bridges")]))
-    np.savetxt(os.path.join(out, "map_prior.txt"), e[keep], fmt="%d")
-    json.dump(info, open(os.path.join(out, "mixture_prior.json"), "w"), indent=2)
+    sfx = f"_{tag}" if tag else ""
+    gq = info["groups"]
+    q_pair = [gq.get("all", gq.get(g, {})).get("q_hat", np.nan) for g in ("in_omega", "bridges")]
+    np.savez_compressed(os.path.join(out, f"mixture_prior{sfx}.npz"), edges=e, rho=rho, in_omega=in_omega,
+                        q_hat=np.array(q_pair))
+    np.savetxt(os.path.join(out, f"map_prior{sfx}.txt"), e[keep], fmt="%d")
+    np.savetxt(os.path.join(out, f"rho{sfx}.txt"), rho, fmt="%.6f")
+    json.dump(info, open(os.path.join(out, f"mixture_prior{sfx}.json"), "w"), indent=2)
     print(json.dumps(info, indent=1))
 
 
@@ -101,6 +122,11 @@ if __name__ == "__main__":
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
     ap.add_argument("--n-random", type=int, default=200000)
     ap.add_argument("--variant", default="best")
+    ap.add_argument("--reference", choices=["uniform", "matched"], default="uniform")
+    ap.add_argument("--pooled", action="store_true")
+    ap.add_argument("--tag", default="", help="output suffix; required for non-default variants")
     a = ap.parse_args()
+    if (a.reference != "uniform" or a.pooled) and not a.tag:
+        ap.error("non-default variants need --tag (the default files are used by the main pipeline)")
     for s in a.seeds:
-        process(a.dataset, s, a.n_random, a.variant)
+        process(a.dataset, s, a.n_random, a.variant, a.reference, a.pooled, a.tag)

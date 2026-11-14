@@ -5,6 +5,16 @@ Needs results/checkpoints/lightgcn_<ds>_seed<k>.pt (interaction-only LightGCN, c
   python scripts/real_study.py prep   --dataset epinions --seeds 0   # mixture prior + MAP graph, SHaRe graphs
   python scripts/real_study.py jobs   --dataset epinions --seeds 0   # writes configs/jobs/real_<ds>.txt
   python scripts/real_study.py report --dataset epinions --seeds 0   # table -> stdout, results/real_<ds>_report.md
+  python scripts/real_study.py ablprep --dataset epinions --seeds 0 1 2   # graphs for controls / ablations (after prep)
+  python scripts/real_study.py jobs --dataset epinions --seeds 0 1 2 --variants empty mapm ...   # those runs
+
+Controls and ablations (graph tags for --variants; files from ablprep):
+  empty        GBSR without social ties (empty social graph)
+  mapm / mapp  MAP graph with the group-matched reference / with one pooled group (mixture_prior.py variants)
+  rhow         all training ties, weighted by rho (soft weights instead of the MAP threshold)
+  add_s3t50A   targeted addition on the observed graph A instead of the MAP graph (addition without pruning)
+  add_ra3t50 / add_ra3t00   RA proposals with / without the posterior check (on the MAP graph)
+  lgs_A / lgs_map           LightGCN-S (no gate, no HSIC; omega 1) on A / on the MAP graph
 
 Runs (omega 1, GBSR's HSIC weight and kernel width for the dataset, paper protocol):
   GBSR on A | GBSR on MAP(prior) | GBSR, SHaRe cut only | GBSR, SHaRe rewiring + weights;
@@ -15,6 +25,7 @@ import csv
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -30,9 +41,9 @@ OMEGAS = [1]
 
 
 def base_of(ds):
-    """'epinions_n50' -> 'epinions' (noisy copies made by scripts/make_noisy_real.py)."""
-    head, _, tail = ds.rpartition("_n")
-    return head if head and tail.isdigit() else ds
+    """'epinions_n50' / 'epinions_fof50' / 'epinions_tri50' -> 'epinions' (copies made by scripts/make_noisy_real.py)."""
+    m = re.match(r"^(.*)_(n|fof|tri)\d+$", ds)
+    return m.group(1) if m else ds
 
 
 def hsic_of(ds):
@@ -92,12 +103,13 @@ def share_graphs(ds, s, block=512):
     return {"ties": int(len(e)), "share_cut": M, "share_added": int(len(add)), "share_mean_weight": float(w.mean())}
 
 
-def targeted_add(ds, s, k=1, max_deg=2, thr=0.5, source="ra", tag=""):
+def targeted_add(ds, s, k=1, max_deg=2, thr=0.5, source="ra", tag="", base="map"):
     """Smart addition for users with 1..max_deg training ties: a proposer suggests candidates, the taste prior verifies.
     source 'ra': top-k two-hop candidates by Resource Allocation on the training graph (structure proposes);
     source 's' : top-k unlinked users by taste similarity s (as SHaRe, but only for these users).
     A candidate is added to the MAP graph only if its mixture posterior rho(s) >= thr, computed with the noise share
     and density ratio of the observed ties of its own group (inside Omega or bridge), as in scripts/mixture_prior.py.
+    base 'map' adds to the MAP graph (default); base 'A' adds to the observed training graph (no pruning).
     Writes pugib/map_add{_tag}.txt and .json."""
     import scipy.sparse as sp
     import torch
@@ -156,12 +168,12 @@ def targeted_add(ds, s, k=1, max_deg=2, thr=0.5, source="ra", tag=""):
             h = iso.predict(s_c[cm])
             post[cm] = np.clip(1 - q * (1 - h) / h * len(s_obs) / len(s_rand), 0, 1)
     acc = cand[post >= thr]
-    mapg = np.loadtxt(os.path.join(d, "pugib/map_prior.txt"), dtype=np.int64)
+    mapg = e if base == "A" else np.loadtxt(os.path.join(d, "pugib/map_prior.txt"), dtype=np.int64, ndmin=2).reshape(-1, 2)
     suffix = f"_{tag}" if tag else ""
     np.savetxt(os.path.join(d, f"pugib/map_add{suffix}.txt"), np.concatenate([mapg, acc]), fmt="%d")
     v = np.loadtxt(os.path.join(d, "social_val.txt"), dtype=np.int64)
     hit = lambda x: int(isin_pairs(x, np.sort(v, 1), n).sum()) if len(x) else 0
-    out = {"source": source, "k": k, "thr": thr, "target_users": int(len(tgt)), "proposed": int(len(cand)),
+    out = {"source": source, "k": k, "thr": thr, "base": base, "target_users": int(len(tgt)), "proposed": int(len(cand)),
            "accepted": int(len(acc)), "proposed_heldout_hits": hit(cand), "accepted_heldout_hits": hit(acc)}
     json.dump(out, open(os.path.join(d, f"pugib/map_add{suffix}.json"), "w"), indent=2)
     return out
@@ -214,6 +226,33 @@ def prep(ds, seeds):
               f"{ad['proposed_heldout_hits']}), accepted {ad['accepted']} (hits {ad['accepted_heldout_hits']})")
 
 
+def ablprep(ds, seeds):
+    """Graphs for the controls and ablations (needs prep first: mixture_prior.npz and map_prior.txt)."""
+    for s in seeds:
+        d = os.path.join(ROOT, sdir(ds, s), "pugib")
+        open(os.path.join(d, "empty.txt"), "w").close()
+        if not os.path.exists(os.path.join(d, "rho.txt")):  # written by mixture_prior.py since the ablation update
+            subprocess.run([sys.executable, os.path.join(ROOT, "scripts/mixture_prior.py"), "--dataset", ds, "--seeds",
+                            str(s)], check=True, stdout=subprocess.DEVNULL)
+        for tag, flags in (("matched", ["--reference", "matched"]), ("pooled", ["--pooled"])):
+            subprocess.run([sys.executable, os.path.join(ROOT, "scripts/mixture_prior.py"), "--dataset", ds, "--seeds",
+                            str(s), "--tag", tag, *flags], check=True, stdout=subprocess.DEVNULL)
+        msg = [f"{ds} seed {s}:"]
+        for tag in ("", "_matched", "_pooled"):
+            info = json.load(open(os.path.join(d, f"mixture_prior{tag}.json")))
+            q = ", ".join(f"{g} {v['q_hat']:.3f}" for g, v in info["groups"].items())
+            msg.append(f"MAP{tag or ' (paper)'} keeps {info['map_kept']} of {info['n_ties']} (q̂ {q});")
+        for tag, (src, k, thr, base) in ABL_ADD.items():
+            ad = targeted_add(ds, s, k=k, thr=thr, source=src, tag=tag, base=base)
+            msg.append(f"addition {tag}: proposed {ad['proposed']}, accepted {ad['accepted']};")
+        print(" ".join(msg))
+
+
+# addition ablations: tag -> (source, k, thr, base graph)
+ABL_ADD = {"s3t50A": ("s", 3, 0.5, "A"), "ra3t50": ("ra", 3, 0.5, "map"), "ra3t00": ("ra", 3, 0.0, "map")}
+# graph tags that are only run when asked for with --variants
+EXTRA = ("empty", "mapm", "mapp", "rhow", "add_s3t50A", "add_ra3t50", "add_ra3t00", "lgs_A", "lgs_map")
+
 def line(cfg, name, ds, s, extra):
     return f"- configs/paper/{cfg}.yaml --no-tune --seeds {s} --set dataset={ds} data_dir=data/processed/{ds} name={name} {extra}"
 
@@ -229,9 +268,25 @@ def jobs(ds, seeds, variants=None):
                   "shp": f"social_edges_file={d}/pugib/share_prune.txt",
                   "sh": f"social_edges_file={d}/pugib/share_edges.txt social_weights_file={d}/pugib/share_w.txt",
                   "rand": f"social_edges_file={d}/pugib/rand_keep_map.txt",
-                  "add_s3t50": f"social_edges_file={d}/pugib/map_add_s3t50.txt"}
+                  "add_s3t50": f"social_edges_file={d}/pugib/map_add_s3t50.txt",
+                  "empty": f"social_edges_file={d}/pugib/empty.txt",
+                  "mapm": f"social_edges_file={d}/pugib/map_prior_matched.txt",
+                  "mapp": f"social_edges_file={d}/pugib/map_prior_pooled.txt",
+                  "rhow": f"social_weights_file={d}/pugib/rho.txt",
+                  "add_s3t50A": f"social_edges_file={d}/pugib/map_add_s3t50A.txt",
+                  "add_ra3t50": f"social_edges_file={d}/pugib/map_add_ra3t50.txt",
+                  "add_ra3t00": f"social_edges_file={d}/pugib/map_add_ra3t00.txt"}
+        lgs = {"lgs_A": "", "lgs_map": f"social_edges_file={d}/pugib/map_prior.txt"}
         if variants:
             graphs = {k: v for k, v in graphs.items() if k in variants}
+            lgs = {k: v for k, v in lgs.items() if k in variants}
+        else:
+            graphs = {k: v for k, v in graphs.items() if k not in EXTRA}
+            lgs = {}
+        for tag, g in lgs.items():  # LightGCN-S: same joint graph, no gate, no HSIC, omega 1
+            name = f"real_{ds}_{tag}"
+            if not os.path.exists(os.path.join(ROOT, f"results/peruser/{ds}/{name}/seed{s}.npz")):
+                out.append(line("lightgcn_s", name, ds, s, f"social_omega=1 {g}".strip()))
         ref = f"real_{ds}_lightgcn"
         if (not variants or "lightgcn" in variants) and \
                 not os.path.exists(os.path.join(ROOT, f"results/peruser/{ds}/{ref}/seed{s}.npz")):
@@ -286,6 +341,15 @@ def report(ds, seeds):
                     ("GBSR, SHaRe cut only (ablation)", f"real_{ds}_gbsr_shp_w1"),
                     ("GBSR, SHaRe rewiring + weights", f"real_{ds}_gbsr_sh_w1"),
                     ("GBSR, random removal (same count as MAP) — control", f"real_{ds}_gbsr_rand_w1"),
+                    ("GBSR without social ties — control", f"real_{ds}_gbsr_empty_w1"),
+                    ("MAP, group-matched reference (ablation)", f"real_{ds}_gbsr_mapm_w1"),
+                    ("MAP, one pooled group (ablation)", f"real_{ds}_gbsr_mapp_w1"),
+                    ("all ties weighted by rho (ablation)", f"real_{ds}_gbsr_rhow_w1"),
+                    ("addition s3t50 on A, no pruning (ablation)", f"real_{ds}_gbsr_add_s3t50A_w1"),
+                    ("addition RA k3 with check (ablation)", f"real_{ds}_gbsr_add_ra3t50_w1"),
+                    ("addition RA k3 without check (ablation)", f"real_{ds}_gbsr_add_ra3t00_w1"),
+                    ("LightGCN-S on A (second backbone)", f"real_{ds}_lgs_A"),
+                    ("LightGCN-S on MAP (second backbone)", f"real_{ds}_lgs_map"),
                     *[(f"MAP + addition {tag} (grid)", f"real_{ds}_gbsr_add_{tag}_w1") for tag in ADD_GRID]):
         entries.append((lab, ds, nm))
     nd = {}
@@ -306,7 +370,7 @@ def report(ds, seeds):
                     dl = np.array([A[x] - R[x] for x in ul])
                     dlow = f"{dl.mean():+.4f} ± {dl.std(ddof=1) / np.sqrt(len(dl)):.4f} (n {len(dl)})"
             if r is None:
-                if A is not None or ("(grid)" not in lab and "control" not in lab and "reference" not in lab):
+                if A is not None or not any(w in lab for w in ("(grid)", "control", "reference", "ablation", "backbone")):
                     lines.append(f"| {lab} | {s} | – | – | – | {delta} | {dlow} | – | – |")
             else:
                 spe = json.loads(r["hparams"]).get("sec_per_epoch", float("nan"))
@@ -364,10 +428,12 @@ def report(ds, seeds):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["prep", "jobs", "addgrid", "report"])
+    ap.add_argument("cmd", choices=["prep", "jobs", "addgrid", "ablprep", "report"])
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
-    ap.add_argument("--variants", nargs="+", default=None, help="addgrid: tags of ADD_GRID; jobs: graph tags (A map mapadd shp sh rand add_s3t50) and/or lightgcn")
+    ap.add_argument("--variants", nargs="+", default=None, help="addgrid: tags of ADD_GRID; jobs: graph tags (A map mapadd shp sh rand add_s3t50, and the "
+                         "controls/ablations empty mapm mapp rhow add_s3t50A add_ra3t50 add_ra3t00 lgs_A lgs_map) "
+                         "and/or lightgcn")
     a = ap.parse_args()
     if a.cmd == "addgrid":
         addgrid(a.dataset, a.seeds, a.variants)
@@ -375,4 +441,4 @@ if __name__ == "__main__":
         if a.cmd == "jobs":
             jobs(a.dataset, a.seeds, a.variants)
         else:
-            {"prep": prep, "report": report}[a.cmd](a.dataset, a.seeds)
+            {"prep": prep, "ablprep": ablprep, "report": report}[a.cmd](a.dataset, a.seeds)

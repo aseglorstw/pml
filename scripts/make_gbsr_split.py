@@ -9,7 +9,9 @@ lastfm_gbsrfmt   : (--smoke) LastFM seed 0 in the same format (val = test, direc
                    self-loops added), only for quick local smoke tests.
 The authors' files are read with the restricted unpickler from data/raw/gbsr_repo/src/datasets/douban_book
 or external/KDD24-GBSR/datasets/douban_book (whichever exists).
-Usage: python scripts/make_gbsr_split.py [--smoke]
+epinions_gbsr / yelp_gbsr : (--dataset epinions | yelp) the authors' Epinions / Yelp files in the same format as
+                   douban_gbsr (selection on their test file); sizes as in their run_GBSR.py.
+Usage: python scripts/make_gbsr_split.py [--smoke] [--dataset douban_book | epinions | yelp]
 """
 import argparse
 import json
@@ -54,6 +56,7 @@ def carve_val(train, frac, rng):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--dataset", default="douban_book", choices=["douban_book", "epinions", "yelp"])
     a = ap.parse_args()
     if a.smoke:
         sp = load_split(os.path.join(ROOT, "data/processed/lastfm/seed_0"))
@@ -62,18 +65,24 @@ def main():
         write("lastfm_gbsrfmt", sp.n_users, sp.n_items, sp.train, sp.test, sp.test, social, True,
               {"source": "LastFM seed 0, smoke test only"})
         return
-    for base in [os.path.join(ROOT, "data/raw/gbsr_repo/src/datasets/douban_book"),
-                 os.path.join(ROOT, "external/KDD24-GBSR/datasets/douban_book")]:
+    for base in [os.path.join(ROOT, "data/raw/gbsr_repo/src/datasets", a.dataset),
+                 os.path.join(ROOT, "external/KDD24-GBSR/datasets", a.dataset)]:
         if os.path.exists(os.path.join(base, "traindata.npy")):
             break
     else:
-        raise FileNotFoundError("authors' douban_book files not found (clone KDD24-GBSR into external/)")
+        raise FileNotFoundError(f"authors' {a.dataset} files not found (clone KDD24-GBSR into external/)")
     tr = safe_load_pickled_npy(os.path.join(base, "traindata.npy"))
     te = safe_load_pickled_npy(os.path.join(base, "testdata.npy"))
     so = safe_load_pickled_npy(os.path.join(base, "user_users_d.npy"))
     train = np.array([(u, i) for u, items in tr.items() for i in items], dtype=np.int64)
     test = np.array([(u, i) for u, items in te.items() for i in items], dtype=np.int64)
     social = np.array([(u, v) for u, vs in so.items() for v in vs], dtype=np.int64)
+    if a.dataset != "douban_book":  # sizes from the official run_GBSR.py
+        nu, ni = {"epinions": (18202, 47449), "yelp": (19539, 22228)}[a.dataset]
+        assert train.max(0)[0] < nu and train.max(0)[1] < ni and (social.max() < nu if len(social) else True)
+        write(f"{a.dataset}_gbsr", nu, ni, train, test, test, social, True,
+              {"source": base, "note": "authors' split; social entries directed as given"})
+        return
     src = {"source": base, "note": "authors' split; social entries directed as given (8 self-loops)"}
     write("douban_gbsr", 13024, 22347, train, test, test, social, True, src)
     tr2, va2 = carve_val(train, 0.1, np.random.default_rng(0))

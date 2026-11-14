@@ -104,6 +104,8 @@ class GBSR(nn.Module):
     @torch.no_grad()
     def eval_diagnostics(self, n_pval_total=None) -> dict:
         g = self.gates(sample=False) - (0 if self.gate_mode == "fixed1" else self.edge_bias)
+        if g.numel() == 0:  # empty social graph (control run)
+            return {"gate_mean": float("nan")}
         return {"gate_mean": g.mean().item(), "gate_std": g.std().item(),
                 "gate_frac_lt05": (g < 0.5).float().mean().item(),
                 "gate_min": g.min().item(), "gate_max": g.max().item()}

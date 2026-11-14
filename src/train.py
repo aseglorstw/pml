@@ -90,7 +90,7 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
     extra = {"social_form": cfg.get("social_form", "gbsr")}
     social_train = split.social_train
     if cfg.get("social_edges_file"):  # e.g. a corrupted training social graph
-        social_train = np.loadtxt(os.path.join(root, cfg["social_edges_file"]), dtype=np.int64, ndmin=2)
+        social_train = np.loadtxt(os.path.join(root, cfg["social_edges_file"]), dtype=np.int64, ndmin=2).reshape(-1, 2)
         extra["social_edges_file"] = cfg["social_edges_file"]
     if method in ("lightgcn", "lightgcn_s"):
         cand = None
