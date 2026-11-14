@@ -21,8 +21,8 @@ SEEDS="0 1 2"
 LIST=configs/jobs/real_fable.txt
 MIX=configs/jobs/mix_fable.txt
 
-add() {  # append a generated list $1 (without its comment line) to list $2 (default $LIST)
-  grep -v '^#' "$1" >> "${2:-$LIST}" || true
+add() {  # append a generated list $1 to list $2 (default $LIST), without finished runs (safe to resume)
+  python scripts/skip_finished.py "$1" >> "${2:-$LIST}"
 }
 
 case $STAGE in
