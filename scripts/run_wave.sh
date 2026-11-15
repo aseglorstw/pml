@@ -4,6 +4,7 @@
 #   bash scripts/run_wave.sh prep                    # CPU, ~10-20 min: noisy Yelp copies, their graphs, randm / full
 #   NPAR=4 nohup bash scripts/run_wave.sh gpu > results/logs/wave_gpu.log 2>&1 &
 #   nohup bash scripts/run_wave.sh official > results/logs/wave_official.log 2>&1 &   # needs a node with 40+ GB RAM
+#   bash scripts/run_wave.sh cpu                     # CPU, minutes: FDR check on injected noise, CPU analyses (after prep)
 #   bash scripts/run_wave.sh report
 # GPU order: synthetic list first (36 short runs: hard worlds at omega 1, GBSR without ties), then the real list:
 #   randm + full on Epinions / Yelp (12) | no ties: no regularizer / uniformity 0.01 0.03 0.1 (36) |
@@ -11,7 +12,7 @@
 # Safe to resume: finished runs are skipped (scripts/skip_finished.py); nothing existing is overwritten.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-STAGE=${1:?prep | gpu | official | report}
+STAGE=${1:?prep | gpu | cpu | official | report}
 if command -v module >/dev/null 2>&1; then module add "${PY_MODULE:-python/3.11.11-gcc-10.2.1-555dlyc}" >/dev/null 2>&1 || true; fi
 source .venv/bin/activate
 mkdir -p results/logs results/jobs configs/jobs
@@ -51,6 +52,12 @@ gpu)
   DEVICE=${DEVICE:-cuda} bash scripts/run_jobs_local.sh "$LIST" "${NPAR:-4}"
   echo "$(date +%FT%T) gpu stage done"
   ;;
+cpu)
+  python scripts/fdr_check.py --datasets epinions_n50 epinions_fof50 yelp_n50 yelp_fof50 --out fdr_check_real
+  python scripts/cpu_analyses.py > /dev/null
+  tar czf wave_cpu.tar.gz results/fdr_check_real.md results/fdr_check_real.csv results/cpu_analyses.md
+  echo "packed wave_cpu.tar.gz"
+  ;;
 official)  # unmodified official code; dense adjacency, needs a lot of RAM
   DATASET=epinions bash scripts/run_official_gbsr.sh "3 0.25 paper" "0 0.25 nohsic"
   DATASET=yelp bash scripts/run_official_gbsr.sh "2 0.25 paper" "0 0.25 nohsic"
@@ -62,6 +69,7 @@ report)
   python scripts/mix_study.py report > /dev/null
   python scripts/summarize_gbsr_port.py > /dev/null
   python scripts/gate_auroc.py --datasets epinions_n50 epinions_fof50 yelp_n50 yelp_fof50 > /dev/null
+  python scripts/cpu_analyses.py > /dev/null
   tar czf wave_results.tar.gz results/*.md results/*.csv results/jobs/local_real_*.csv results/jobs/local_mix_*.csv
   echo "reports packed into wave_results.tar.gz"
   ;;
