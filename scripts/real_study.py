@@ -15,6 +15,11 @@ Controls and ablations (graph tags for --variants; files from ablprep):
   add_s3t50A   targeted addition on the observed graph A instead of the MAP graph (addition without pruning)
   add_ra3t50 / add_ra3t00   RA proposals with / without the posterior check (on the MAP graph)
   lgs_A / lgs_map           LightGCN-S (no gate, no HSIC; omega 1) on A / on the MAP graph
+  randm        random removal, same number of kept ties as the matched MAP graph (control for mapm)
+  full         all ties incl. the held-out ones (social_train + social_val): ceiling of addition
+  u0 / u001 / u003 / u01    GBSR pipeline without social ties: no regularizer / DirectAU uniformity with weight
+               0.01 / 0.03 / 0.1 instead of HSIC (does HSIC act as a graph-independent uniformity regularizer?)
+  (files of randm / full: python scripts/real_study.py waveprep --dataset <ds> --seeds 0 1 2, after ablprep)
 
 Runs (omega 1, GBSR's HSIC weight and kernel width for the dataset, paper protocol):
   GBSR on A | GBSR on MAP(prior) | GBSR, SHaRe cut only | GBSR, SHaRe rewiring + weights;
@@ -251,7 +256,24 @@ def ablprep(ds, seeds):
 # addition ablations: tag -> (source, k, thr, base graph)
 ABL_ADD = {"s3t50A": ("s", 3, 0.5, "A"), "ra3t50": ("ra", 3, 0.5, "map"), "ra3t00": ("ra", 3, 0.0, "map")}
 # graph tags that are only run when asked for with --variants
-EXTRA = ("empty", "mapm", "mapp", "rhow", "add_s3t50A", "add_ra3t50", "add_ra3t00", "lgs_A", "lgs_map")
+EXTRA = ("empty", "mapm", "mapp", "rhow", "add_s3t50A", "add_ra3t50", "add_ra3t00", "lgs_A", "lgs_map",
+         "randm", "full")
+# regularizer controls on the empty social graph: tag -> (reg_kind, weight)
+UNIF = {"u0": ("hsic", 0), "u001": ("uniform", 0.01), "u003": ("uniform", 0.03), "u01": ("uniform", 0.1)}
+
+
+def waveprep(ds, seeds):
+    """randm (random removal, as many kept ties as the matched MAP graph) and full (train + held-out ties)."""
+    for s in seeds:
+        d = os.path.join(ROOT, sdir(ds, s))
+        e = np.loadtxt(os.path.join(d, "social_train.txt"), dtype=np.int64)
+        k = json.load(open(os.path.join(d, "pugib/mixture_prior_matched.json")))["map_kept"]
+        keep = np.sort(np.random.default_rng([s, 12]).choice(len(e), k, replace=False))
+        np.savetxt(os.path.join(d, "pugib/rand_keep_mapm.txt"), e[keep], fmt="%d")
+        va = np.loadtxt(os.path.join(d, "social_val.txt"), dtype=np.int64, ndmin=2).reshape(-1, 2)
+        np.savetxt(os.path.join(d, "pugib/full.txt"), np.concatenate([e, va]), fmt="%d")
+        open(os.path.join(d, "pugib/empty.txt"), "a").close()
+        print(f"{ds} seed {s}: randm keeps {k} of {len(e)}; full = {len(e)} + {len(va)} held-out ties")
 
 def line(cfg, name, ds, s, extra):
     return f"- configs/paper/{cfg}.yaml --no-tune --seeds {s} --set dataset={ds} data_dir=data/processed/{ds} name={name} {extra}"
@@ -275,7 +297,9 @@ def jobs(ds, seeds, variants=None):
                   "rhow": f"social_weights_file={d}/pugib/rho.txt",
                   "add_s3t50A": f"social_edges_file={d}/pugib/map_add_s3t50A.txt",
                   "add_ra3t50": f"social_edges_file={d}/pugib/map_add_ra3t50.txt",
-                  "add_ra3t00": f"social_edges_file={d}/pugib/map_add_ra3t00.txt"}
+                  "add_ra3t00": f"social_edges_file={d}/pugib/map_add_ra3t00.txt",
+                  "randm": f"social_edges_file={d}/pugib/rand_keep_mapm.txt",
+                  "full": f"social_edges_file={d}/pugib/full.txt"}
         lgs = {"lgs_A": "", "lgs_map": f"social_edges_file={d}/pugib/map_prior.txt"}
         if variants:
             graphs = {k: v for k, v in graphs.items() if k in variants}
@@ -291,6 +315,13 @@ def jobs(ds, seeds, variants=None):
         if (not variants or "lightgcn" in variants) and \
                 not os.path.exists(os.path.join(ROOT, f"results/peruser/{ds}/{ref}/seed{s}.npz")):
             out.append(f"- configs/{ds}_lightgcn.yaml --no-tune --seeds {s} --set name={ref} save_checkpoint=false")
+        for tag, (kind, wgt) in UNIF.items():  # regularizer controls, empty social graph
+            if not variants or tag not in variants:
+                continue
+            name = f"real_{ds}_gbsr_{tag}_w1"
+            if not os.path.exists(os.path.join(ROOT, f"results/peruser/{ds}/{name}/seed{s}.npz")):
+                out.append(line("gbsr", name, ds, s, f"social_omega=1 social_edges_file={d}/pugib/empty.txt "
+                                                     f"reg_kind={kind} hsic_lambda={wgt} hsic_sigma={sig}"))
         for tag, g in graphs.items():
             for om in OMEGAS:
                 wt = str(om).replace(".", "")
@@ -334,7 +365,8 @@ def report(ds, seeds):
     entries = []
     if base != ds:  # noisy copy: the same split with the clean graph, as reference
         entries += [("GBSR on the clean graph (reference)", base, f"real_{base}_gbsr_A_w1"),
-                    ("ours on the clean graph (reference)", base, f"real_{base}_gbsr_map_w1")]
+                    ("ours on the clean graph (reference)", base, f"real_{base}_gbsr_map_w1"),
+                    ("matched on the clean graph (reference)", base, f"real_{base}_gbsr_mapm_w1")]
     for lab, nm in (("LightGCN (no social graph)", f"real_{ds}_lightgcn"), ("GBSR on A", ref),
                     ("GBSR on MAP(prior) — ours", f"real_{ds}_gbsr_map_w1"),
                     ("GBSR on MAP(prior) + targeted addition — ours", f"real_{ds}_gbsr_mapadd_w1"),
@@ -342,6 +374,11 @@ def report(ds, seeds):
                     ("GBSR, SHaRe rewiring + weights", f"real_{ds}_gbsr_sh_w1"),
                     ("GBSR, random removal (same count as MAP) — control", f"real_{ds}_gbsr_rand_w1"),
                     ("GBSR without social ties — control", f"real_{ds}_gbsr_empty_w1"),
+                    ("no social ties, no regularizer (HSIC weight 0) — control", f"real_{ds}_gbsr_u0_w1"),
+                    *[(f"no social ties, uniformity {w} instead of HSIC — control", f"real_{ds}_gbsr_{tag}_w1")
+                      for tag, (k, w) in UNIF.items() if k == "uniform"],
+                    ("GBSR, random removal (same count as matched) — control", f"real_{ds}_gbsr_randm_w1"),
+                    ("GBSR on all ties incl. held-out (addition ceiling)", f"real_{ds}_gbsr_full_w1"),
                     ("MAP, group-matched reference (ablation)", f"real_{ds}_gbsr_mapm_w1"),
                     ("MAP, one pooled group (ablation)", f"real_{ds}_gbsr_mapp_w1"),
                     ("all ties weighted by rho (ablation)", f"real_{ds}_gbsr_rhow_w1"),
@@ -428,7 +465,7 @@ def report(ds, seeds):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["prep", "jobs", "addgrid", "ablprep", "report"])
+    ap.add_argument("cmd", choices=["prep", "jobs", "addgrid", "ablprep", "waveprep", "report"])
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
     ap.add_argument("--variants", nargs="+", default=None, help="addgrid: tags of ADD_GRID; jobs: graph tags (A map mapadd shp sh rand add_s3t50, and the "
@@ -441,4 +478,4 @@ if __name__ == "__main__":
         if a.cmd == "jobs":
             jobs(a.dataset, a.seeds, a.variants)
         else:
-            {"prep": prep, "ablprep": ablprep, "report": report}[a.cmd](a.dataset, a.seeds)
+            {"prep": prep, "ablprep": ablprep, "waveprep": waveprep, "report": report}[a.cmd](a.dataset, a.seeds)

@@ -36,6 +36,11 @@ def hsic(Kx, Ky, m):
     return h * (m / (m - 1)) ** 2
 
 
+def uniformity(x, t=2.0):
+    """DirectAU uniformity loss on L2-normalized rows: log mean_{i<j} exp(-t ||x_i - x_j||^2)."""
+    return torch.pdist(x, p=2).pow(2).mul(-t).exp().mean().log()
+
+
 class GBSR(nn.Module):
     """Options (all default to the behaviour described in the GBSR paper; the official code differs):
     detach_mask : True = official PyTorch code (torch_version/GBSR.py line 68), masker gets no gradient.
@@ -44,12 +49,15 @@ class GBSR(nn.Module):
     gate_mode   : 'learned' = MLP gate; 'fixed1' = every social weight fixed to 1 (masked graph = observed
                   graph), HSIC kept (ablation).
     hsic_items  : False = HSIC on users only (ablation).
+    reg_kind    : 'hsic' = GBSR's HSIC(unmasked, masked); 'uniform' = DirectAU uniformity (Wang et al., KDD 2022)
+                  log mean exp(-2 ||x - y||^2) over the same L2-normalized batch users / positive items, weight beta
+                  (control: does GBSR's HSIC act as a graph-independent uniformity regularizer?).
     """
 
     def __init__(self, n_users, n_items, train, social_edges, beta=5.0, sigma=0.25, edge_bias=0.5,
                  tau=0.2, detach_mask=False, batch_size=2048, dim=64, n_layers=3, omega_s=0.5,
                  device="cpu", social_form="ours", social_directed=False, init_std=0.1,
-                 eval_gate="mean", gate_mode="learned", hsic_items=True):
+                 eval_gate="mean", gate_mode="learned", hsic_items=True, reg_kind="hsic"):
         super().__init__()
         self.backbone = LightGCN(n_users, n_items, train, dim=dim, n_layers=n_layers,
                                  social_edges=social_edges, omega_s=omega_s, device=device,
@@ -59,6 +67,8 @@ class GBSR(nn.Module):
         self.beta, self.sigma, self.edge_bias, self.tau = beta, sigma, edge_bias, tau
         self.detach_mask, self.m = detach_mask, batch_size
         self.eval_gate, self.gate_mode, self.hsic_items = eval_gate, gate_mode, hsic_items
+        assert reg_kind in ("hsic", "uniform"), reg_kind
+        self.reg_kind = reg_kind
         self.n_users = n_users
 
     @property
@@ -87,6 +97,12 @@ class GBSR(nn.Module):
         if self.beta == 0:
             return rec, {"bpr": bpr}
         eu_m, ei_m = self.backbone._last_prop
+        if self.reg_kind == "uniform":
+            uu, ii = torch.unique(users), torch.unique(pos)
+            ib = uniformity(F.normalize(eu_m[uu], dim=1))
+            if self.hsic_items:
+                ib = ib + uniformity(F.normalize(ei_m[ii], dim=1))
+            return rec + self.beta * ib, {"bpr": bpr, "unif": ib.detach()}
         eu_o, ei_o = self.backbone.propagate(None)  # observed (unmasked) graph
         uu = torch.unique(users)
         ib = hsic(kernel_matrix(F.normalize(eu_o[uu], dim=1), self.sigma),

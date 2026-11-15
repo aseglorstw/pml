@@ -109,7 +109,8 @@ def build_model(split: Split, cfg: dict, seed: int, root: str, device: str):
                      detach_mask=cfg.get("detach_mask", False), batch_size=cfg["batch_size"],
                      social_form=social_form, social_directed=split.social_directed,
                      init_std=cfg.get("init_std", 0.1), eval_gate=cfg.get("eval_gate", "mean"),
-                     gate_mode=cfg.get("gate_mode", "learned"), hsic_items=cfg.get("hsic_items", True), **common)
+                     gate_mode=cfg.get("gate_mode", "learned"), hsic_items=cfg.get("hsic_items", True),
+                     reg_kind=cfg.get("reg_kind", "hsic"), **common)
     elif method in ("lightgcn_pu", "pugib"):
         from .models.pugib import PUGIB, pair_features
         from .pugib_data import load_pugib_inputs
