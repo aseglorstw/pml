@@ -15,6 +15,7 @@ Controls and ablations (graph tags for --variants; files from ablprep):
   add_s3t50A   targeted addition on the observed graph A instead of the MAP graph (addition without pruning)
   add_ra3t50 / add_ra3t00   RA proposals with / without the posterior check (on the MAP graph)
   lgs_A / lgs_map           LightGCN-S (no gate, no HSIC; omega 1) on A / on the MAP graph
+  add_s3t50m   targeted addition (s top-3, matched check) on the matched MAP graph (needs addmprep)
   randm        random removal, same number of kept ties as the matched MAP graph (control for mapm)
   full         all ties incl. the held-out ones (social_train + social_val): ceiling of addition
   u0 / u001 / u003 / u01    GBSR pipeline without social ties: no regularizer / DirectAU uniformity with weight
@@ -108,13 +109,15 @@ def share_graphs(ds, s, block=512):
     return {"ties": int(len(e)), "share_cut": M, "share_added": int(len(add)), "share_mean_weight": float(w.mean())}
 
 
-def targeted_add(ds, s, k=1, max_deg=2, thr=0.5, source="ra", tag="", base="map"):
+def targeted_add(ds, s, k=1, max_deg=2, thr=0.5, source="ra", tag="", base="map", reference="uniform"):
     """Smart addition for users with 1..max_deg training ties: a proposer suggests candidates, the taste prior verifies.
     source 'ra': top-k two-hop candidates by Resource Allocation on the training graph (structure proposes);
     source 's' : top-k unlinked users by taste similarity s (as SHaRe, but only for these users).
     A candidate is added to the MAP graph only if its mixture posterior rho(s) >= thr, computed with the noise share
     and density ratio of the observed ties of its own group (inside Omega or bridge), as in scripts/mixture_prior.py.
-    base 'map' adds to the MAP graph (default); base 'A' adds to the observed training graph (no pruning).
+    base 'map' adds to the MAP graph (default); base 'A' adds to the observed training graph (no pruning);
+    base 'mapm' adds to the matched MAP graph. reference 'matched': the check uses the group-matched reference
+    (unlinked pairs with >= 1 common neighbour for triangle candidates, without one for bridges), as for mapm.
     Writes pugib/map_add{_tag}.txt and .json."""
     import scipy.sparse as sp
     import torch
@@ -159,26 +162,36 @@ def targeted_add(ds, s, k=1, max_deg=2, thr=0.5, source="ra", tag="", base="map"
     r = r[r[:, 0] != r[:, 1]]
     r = r[~isin_pairs(r, e, n)]
     s_rand = np.einsum("ij,ij->i", z[r[:, 0]], z[r[:, 1]])
+    ref = {"in": s_rand, "br": s_rand}
+    if reference == "matched":  # same reference pairs as mixture_prior.py --reference matched
+        from src.pugib_prep import build_omega  # noqa: E402
+        th = build_omega(A)
+        th = th[~isin_pairs(th, e, n)]
+        if len(th) > 200000:
+            th = th[np.sort(rng.choice(len(th), 200000, replace=False))]
+        cn_r = np.asarray(A[r[:, 0]].multiply(A[r[:, 1]]).sum(1)).ravel()
+        ref = {"in": np.einsum("ij,ij->i", z[th[:, 0]], z[th[:, 1]]), "br": s_rand[cn_r == 0]}
     post = np.zeros(len(cand))
     if len(cand):
         s_c = np.einsum("ij,ij->i", z[cand[:, 0]], z[cand[:, 1]])
         c_in = np.asarray(A[cand[:, 0]].multiply(A[cand[:, 1]]).sum(1)).ravel() > 0
-        for grp, cm in ((inom, c_in), (~inom, ~c_in)):
+        for grp, cm, sr in ((inom, c_in, ref["in"]), (~inom, ~c_in, ref["br"])):
             if grp.sum() < 10 or cm.sum() == 0:
                 continue
             s_obs = np.einsum("ij,ij->i", z[e[grp, 0]], z[e[grp, 1]])
-            q, _ = noise_share(s_obs, s_rand)
+            q, _ = noise_share(s_obs, sr)
             iso = IsotonicRegression(increasing=True, out_of_bounds="clip", y_min=1e-9, y_max=1 - 1e-9).fit(
-                np.concatenate([s_obs, s_rand]), np.concatenate([np.ones(len(s_obs)), np.zeros(len(s_rand))]))
+                np.concatenate([s_obs, sr]), np.concatenate([np.ones(len(s_obs)), np.zeros(len(sr))]))
             h = iso.predict(s_c[cm])
-            post[cm] = np.clip(1 - q * (1 - h) / h * len(s_obs) / len(s_rand), 0, 1)
+            post[cm] = np.clip(1 - q * (1 - h) / h * len(s_obs) / len(sr), 0, 1)
     acc = cand[post >= thr]
-    mapg = e if base == "A" else np.loadtxt(os.path.join(d, "pugib/map_prior.txt"), dtype=np.int64, ndmin=2).reshape(-1, 2)
+    mapf = {"map": "pugib/map_prior.txt", "mapm": "pugib/map_prior_matched.txt"}
+    mapg = e if base == "A" else np.loadtxt(os.path.join(d, mapf[base]), dtype=np.int64, ndmin=2).reshape(-1, 2)
     suffix = f"_{tag}" if tag else ""
     np.savetxt(os.path.join(d, f"pugib/map_add{suffix}.txt"), np.concatenate([mapg, acc]), fmt="%d")
     v = np.loadtxt(os.path.join(d, "social_val.txt"), dtype=np.int64)
     hit = lambda x: int(isin_pairs(x, np.sort(v, 1), n).sum()) if len(x) else 0
-    out = {"source": source, "k": k, "thr": thr, "base": base, "target_users": int(len(tgt)), "proposed": int(len(cand)),
+    out = {"source": source, "k": k, "thr": thr, "base": base, "reference": reference, "target_users": int(len(tgt)), "proposed": int(len(cand)),
            "accepted": int(len(acc)), "proposed_heldout_hits": hit(cand), "accepted_heldout_hits": hit(acc)}
     json.dump(out, open(os.path.join(d, f"pugib/map_add{suffix}.json"), "w"), indent=2)
     return out
@@ -257,7 +270,7 @@ def ablprep(ds, seeds):
 ABL_ADD = {"s3t50A": ("s", 3, 0.5, "A"), "ra3t50": ("ra", 3, 0.5, "map"), "ra3t00": ("ra", 3, 0.0, "map")}
 # graph tags that are only run when asked for with --variants
 EXTRA = ("empty", "mapm", "mapp", "rhow", "add_s3t50A", "add_ra3t50", "add_ra3t00", "lgs_A", "lgs_map",
-         "randm", "full")
+         "randm", "full", "add_s3t50m")
 # regularizer controls on the empty social graph: tag -> (reg_kind, weight)
 UNIF = {"u0": ("hsic", 0), "u001": ("uniform", 0.01), "u003": ("uniform", 0.03), "u01": ("uniform", 0.1)}
 
@@ -274,6 +287,14 @@ def waveprep(ds, seeds):
         np.savetxt(os.path.join(d, "pugib/full.txt"), np.concatenate([e, va]), fmt="%d")
         open(os.path.join(d, "pugib/empty.txt"), "a").close()
         print(f"{ds} seed {s}: randm keeps {k} of {len(e)}; full = {len(e)} + {len(va)} held-out ties")
+
+def addmprep(ds, seeds):
+    """Addition on the matched MAP graph (s top-3, check rho >= 0.5 with the matched reference): pugib/map_add_s3t50m."""
+    for s in seeds:
+        ad = targeted_add(ds, s, k=3, thr=0.5, source="s", tag="s3t50m", base="mapm", reference="matched")
+        print(f"{ds} seed {s} s3t50m: {ad['target_users']} users with 1-2 ties, proposed {ad['proposed']} "
+              f"(held-out hits {ad['proposed_heldout_hits']}), accepted {ad['accepted']} (hits {ad['accepted_heldout_hits']})")
+
 
 def line(cfg, name, ds, s, extra):
     return f"- configs/paper/{cfg}.yaml --no-tune --seeds {s} --set dataset={ds} data_dir=data/processed/{ds} name={name} {extra}"
@@ -299,7 +320,8 @@ def jobs(ds, seeds, variants=None):
                   "add_ra3t50": f"social_edges_file={d}/pugib/map_add_ra3t50.txt",
                   "add_ra3t00": f"social_edges_file={d}/pugib/map_add_ra3t00.txt",
                   "randm": f"social_edges_file={d}/pugib/rand_keep_mapm.txt",
-                  "full": f"social_edges_file={d}/pugib/full.txt"}
+                  "full": f"social_edges_file={d}/pugib/full.txt",
+                  "add_s3t50m": f"social_edges_file={d}/pugib/map_add_s3t50m.txt"}
         lgs = {"lgs_A": "", "lgs_map": f"social_edges_file={d}/pugib/map_prior.txt"}
         if variants:
             graphs = {k: v for k, v in graphs.items() if k in variants}
@@ -380,6 +402,7 @@ def report(ds, seeds):
                     ("GBSR, random removal (same count as matched) — control", f"real_{ds}_gbsr_randm_w1"),
                     ("GBSR on all ties incl. held-out (addition ceiling)", f"real_{ds}_gbsr_full_w1"),
                     ("MAP, group-matched reference (ablation)", f"real_{ds}_gbsr_mapm_w1"),
+                    ("matched MAP + addition s3t50, matched check — ours", f"real_{ds}_gbsr_add_s3t50m_w1"),
                     ("MAP, one pooled group (ablation)", f"real_{ds}_gbsr_mapp_w1"),
                     ("all ties weighted by rho (ablation)", f"real_{ds}_gbsr_rhow_w1"),
                     ("addition s3t50 on A, no pruning (ablation)", f"real_{ds}_gbsr_add_s3t50A_w1"),
@@ -465,7 +488,7 @@ def report(ds, seeds):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["prep", "jobs", "addgrid", "ablprep", "waveprep", "report"])
+    ap.add_argument("cmd", choices=["prep", "jobs", "addgrid", "ablprep", "waveprep", "addmprep", "report"])
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
     ap.add_argument("--variants", nargs="+", default=None, help="addgrid: tags of ADD_GRID; jobs: graph tags (A map mapadd shp sh rand add_s3t50, and the "
@@ -478,4 +501,4 @@ if __name__ == "__main__":
         if a.cmd == "jobs":
             jobs(a.dataset, a.seeds, a.variants)
         else:
-            {"prep": prep, "ablprep": ablprep, "waveprep": waveprep, "report": report}[a.cmd](a.dataset, a.seeds)
+            {"prep": prep, "ablprep": ablprep, "waveprep": waveprep, "addmprep": addmprep, "report": report}[a.cmd](a.dataset, a.seeds)

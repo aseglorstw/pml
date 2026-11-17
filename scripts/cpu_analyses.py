@@ -61,7 +61,8 @@ def addition_precision(L):
           "| dataset | proposer | proposed | hits | precision | accepted | precision | rejected | precision | chance |",
           "|---|---|---|---|---|---|---|---|---|---|"]
     tags = {"": "RA top-1, check ρ ≥ 0.5 (paper)", "_ra3t50": "RA top-3, check ρ ≥ 0.5",
-            "_ra3t00": "RA top-3, no check", "_s3t50": "taste s top-3, check ρ ≥ 0.5"}
+            "_ra3t00": "RA top-3, no check", "_s3t50": "taste s top-3, check ρ ≥ 0.5",
+            "_s3t50m": "taste s top-3 on matched MAP, matched check"}
     for ds in REAL:
         chance = []
         for s in SEEDS:
@@ -93,7 +94,7 @@ def low_tie_users(L):
     L += ["## 2. Users with 1-2 training ties: Δ NDCG@20 vs GBSR on A (per user averaged over seeds, then over users)",
           "", "| dataset | run | Δ ± SE (t, users) |", "|---|---|---|"]
     runs = [("no social ties (placebo for any graph change)", "empty"), ("MAP", "map"), ("matched MAP", "mapm"),
-            ("MAP + RA top-1 addition (paper)", "mapadd"), ("MAP + s top-3 addition", "add_s3t50"),
+            ("MAP + RA top-1 addition (paper)", "mapadd"), ("MAP + s top-3 addition", "add_s3t50"), ("matched MAP + s top-3 addition", "add_s3t50m"),
             ("A + s top-3 addition, no pruning", "add_s3t50A"), ("MAP + RA top-3 with check", "add_ra3t50"),
             ("MAP + RA top-3 without check", "add_ra3t00"), ("random removal, MAP count", "rand")]
     for ds in REAL:
