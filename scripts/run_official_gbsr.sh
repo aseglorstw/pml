@@ -34,5 +34,6 @@ for r in "${RUNS[@]}"; do
   echo "$(date +%FT%T) official GBSR start dataset=$DS beta=$BETA sigma=$SIGMA runid=$RID" | tee -a "$ROOTDIR/results/logs/official_gbsr_status.log"
   "$ROOTDIR/.venv_gbsr/bin/python" -u run_GBSR.py --dataset "$DS" --runid "$RID" --beta "$BETA" --sigma "$SIGMA" \
      > "$ROOTDIR/results/logs/official_gbsr_${DS}_${RID}.log" 2>&1
-  echo "$(date +%FT%T) official GBSR end dataset=$DS runid=$RID exit $?" | tee -a "$ROOTDIR/results/logs/official_gbsr_status.log"
+  RC=$?  # before $(date), which would overwrite $?; 137 = killed (usually out of memory)
+  echo "$(date +%FT%T) official GBSR end dataset=$DS runid=$RID exit $RC" | tee -a "$ROOTDIR/results/logs/official_gbsr_status.log"
 done
